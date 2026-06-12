@@ -1,0 +1,89 @@
+"""Application configuration, environment loading, and logging setup."""
+
+from __future__ import annotations
+
+import logging
+import os
+from dataclasses import dataclass
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/122.0.0.0 Safari/537.36"
+)
+
+LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+LOG_FILE = Path(__file__).resolve().parent / "monitor.log"
+
+
+@dataclass(frozen=True, slots=True)
+class Settings:
+    """Runtime settings loaded from environment variables."""
+
+    twilio_account_sid: str
+    twilio_auth_token: str
+    twilio_from_number: str
+    twilio_to_number: str
+    ntfy_topic: str
+    gmail_address: str
+    gmail_app_password: str
+    alert_email_to: str
+    poll_interval_business: int = 1800
+    poll_interval_overnight: int = 7200
+    business_hours_start: int = 9
+    business_hours_end: int = 18
+    request_timeout: int = 15
+    min_alert_interval: int = 3600
+    user_agent: str = DEFAULT_USER_AGENT
+
+
+def _env_int(name: str, default: int) -> int:
+    """Read an integer environment variable, falling back to ``default``."""
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return int(raw)
+
+
+def get_settings() -> Settings:
+    """Load application settings from the environment and ``.env`` file."""
+    load_dotenv()
+
+    return Settings(
+        twilio_account_sid=os.getenv("TWILIO_ACCOUNT_SID", ""),
+        twilio_auth_token=os.getenv("TWILIO_AUTH_TOKEN", ""),
+        twilio_from_number=os.getenv("TWILIO_FROM_NUMBER", ""),
+        twilio_to_number=os.getenv("TWILIO_TO_NUMBER", ""),
+        ntfy_topic=os.getenv("NTFY_TOPIC", ""),
+        gmail_address=os.getenv("GMAIL_ADDRESS", ""),
+        gmail_app_password=os.getenv("GMAIL_APP_PASSWORD", ""),
+        alert_email_to=os.getenv("ALERT_EMAIL_TO", ""),
+        poll_interval_business=_env_int("POLL_INTERVAL_BUSINESS", 1800),
+        poll_interval_overnight=_env_int("POLL_INTERVAL_OVERNIGHT", 7200),
+        business_hours_start=_env_int("BUSINESS_HOURS_START", 9),
+        business_hours_end=_env_int("BUSINESS_HOURS_END", 18),
+        request_timeout=_env_int("REQUEST_TIMEOUT", 15),
+        min_alert_interval=_env_int("MIN_ALERT_INTERVAL", 3600),
+        user_agent=os.getenv("USER_AGENT", DEFAULT_USER_AGENT),
+    )
+
+
+def setup_logging() -> None:
+    """Configure root logging to console and ``monitor.log``."""
+    root = logging.getLogger()
+    if root.handlers:
+        return
+
+    root.setLevel(logging.INFO)
+    formatter = logging.Formatter(LOG_FORMAT)
+
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    root.addHandler(console_handler)
+
+    file_handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
+    file_handler.setFormatter(formatter)
+    root.addHandler(file_handler)
