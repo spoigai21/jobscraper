@@ -42,6 +42,7 @@ def _default_state(company: CompanyConfig) -> StateRecord:
         company=company.name,
         url=company.url,
         last_hash="",
+        last_text="",
         last_checked=now_iso,
         last_alerted=None,
         alert_count=0,

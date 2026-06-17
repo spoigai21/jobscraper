@@ -49,6 +49,7 @@ class StateStore:
                     company      TEXT PRIMARY KEY,
                     url          TEXT NOT NULL,
                     last_hash    TEXT NOT NULL,
+                    last_text    TEXT NOT NULL DEFAULT '',
                     last_checked TEXT NOT NULL,
                     last_alerted TEXT,
                     alert_count  INTEGER NOT NULL DEFAULT 0
@@ -72,7 +73,21 @@ class StateStore:
                 """
             )
             conn.commit()
+            self._migrate_schema(conn)
         logger.debug("Initialized database at %s", self.db_path)
+
+    def _migrate_schema(self, conn: sqlite3.Connection) -> None:
+        """Apply additive schema migrations for existing databases."""
+        columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(company_state)").fetchall()
+        }
+        if "last_text" not in columns:
+            conn.execute(
+                "ALTER TABLE company_state ADD COLUMN last_text TEXT NOT NULL DEFAULT ''"
+            )
+            conn.commit()
+            logger.info("Migrated company_state: added last_text column")
 
     def get_state(self, company: str) -> StateRecord | None:
         """Return persisted state for *company*, or ``None`` if never seen.
@@ -83,7 +98,8 @@ class StateStore:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT company, url, last_hash, last_checked, last_alerted, alert_count
+                SELECT company, url, last_hash, last_text, last_checked,
+                       last_alerted, alert_count
                 FROM company_state
                 WHERE company = ?
                 """,
@@ -97,6 +113,7 @@ class StateStore:
             company=row["company"],
             url=row["url"],
             last_hash=row["last_hash"],
+            last_text=row["last_text"] or "",
             last_checked=row["last_checked"],
             last_alerted=row["last_alerted"],
             alert_count=row["alert_count"],
@@ -108,11 +125,13 @@ class StateStore:
             conn.execute(
                 """
                 INSERT INTO company_state (
-                    company, url, last_hash, last_checked, last_alerted, alert_count
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    company, url, last_hash, last_text, last_checked,
+                    last_alerted, alert_count
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(company) DO UPDATE SET
                     url          = excluded.url,
                     last_hash    = excluded.last_hash,
+                    last_text    = excluded.last_text,
                     last_checked = excluded.last_checked,
                     last_alerted = excluded.last_alerted,
                     alert_count  = excluded.alert_count
@@ -121,6 +140,7 @@ class StateStore:
                     record.company,
                     record.url,
                     record.last_hash,
+                    record.last_text or "",
                     record.last_checked,
                     record.last_alerted,
                     record.alert_count,
@@ -174,7 +194,8 @@ class StateStore:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT company, url, last_hash, last_checked, last_alerted, alert_count
+                SELECT company, url, last_hash, last_text, last_checked,
+                       last_alerted, alert_count
                 FROM company_state
                 ORDER BY company
                 """
@@ -185,6 +206,7 @@ class StateStore:
                 company=row["company"],
                 url=row["url"],
                 last_hash=row["last_hash"],
+                last_text=row["last_text"] or "",
                 last_checked=row["last_checked"],
                 last_alerted=row["last_alerted"],
                 alert_count=row["alert_count"],

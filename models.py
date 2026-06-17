@@ -36,3 +36,4 @@ class StateRecord:
     last_checked: str
     last_alerted: str | None
     alert_count: int
+    last_text: str = ""
