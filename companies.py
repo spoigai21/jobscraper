@@ -206,9 +206,9 @@ COMPANIES: list[CompanyConfig] = [
     ),
     CompanyConfig(
         name="Scale AI",
-        url="https://scale.com/careers/university",
+        url="https://boards-api.greenhouse.io/v1/boards/scaleai/jobs?content=true",
         keywords=FILTERED_INTERN_KEYWORDS,
-        enabled=True,
+        enabled=True,  # Greenhouse API (scale.com/careers/university is Next.js SPA)
     ),
     CompanyConfig(
         name="NVIDIA",
@@ -256,7 +256,7 @@ COMPANIES: list[CompanyConfig] = [
         name="Netflix",
         url="https://api.lever.co/v0/postings/netflix",
         keywords=FILTERED_INTERN_KEYWORDS,
-        enabled=True,
+        enabled=False,  # Lever API returns []; explore.jobs.netflix.net is JS-rendered
     ),
     CompanyConfig(
         name="LinkedIn",
@@ -339,7 +339,7 @@ COMPANIES: list[CompanyConfig] = [
         name="Airbnb",
         url="https://boards-api.greenhouse.io/v1/boards/airbnb/jobs?content=true",
         keywords=FILTERED_INTERN_KEYWORDS,
-        enabled=True,
+        enabled=True,  # Greenhouse JSON; job links resolve to careers.airbnb.com/positions/
     ),
     CompanyConfig(
         name="Brex",

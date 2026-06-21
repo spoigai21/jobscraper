@@ -55,6 +55,8 @@ class TestLoadProfile:
 
     def test_prestige_tiers(self, profile) -> None:
         assert profile.prestige.tier_for_company("Google") == "s"
+        assert profile.prestige.tier_for_company("SpaceX") == "a"
+        assert profile.prestige.tier_for_company("Airbnb") == "a"
         assert profile.prestige.tier_for_company("Skydio") == "b"
         assert profile.prestige.tier_for_company("NASA") == "b"
         assert profile.prestige.tier_for_company("Unknown Corp") is None
