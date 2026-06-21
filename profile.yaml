@@ -162,12 +162,11 @@ prestige:
     - Salesforce
     - Airbnb
     - Pinterest
-  tier_b:
     - SpaceX
+  tier_b:
     - Zoox
     - Skydio
     - Nuro
-    - Blue Origin
     - Rocket Lab
     - Planet Labs
     - Relativity
@@ -175,18 +174,10 @@ prestige:
     - Astranis
     - NASA
     - JPL
-    - Anduril
-    - Aurora
-    - Applied Intuition
     - Tesla
   tier_c:
-    - Visa
-    - Coinbase
-    - Plaid
     - Ramp
-    - Brex
     - DoorDash
-    - Instacart
     - Lyft
     - Cloudflare
     - MongoDB
@@ -194,9 +185,7 @@ prestige:
     - Discord
     - Snap
     - Reddit
-    - Palantir
     - Adobe
-    - IBM
     - ByteDance
     - TikTok
 
