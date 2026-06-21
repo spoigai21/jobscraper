@@ -1,7 +1,11 @@
+"""Careers page fetching, parsing, and change-detection for the internship monitor."""
+
 from __future__ import annotations
 
+import difflib
 import hashlib
 import logging
+import re
 import time
 from datetime import datetime, timezone
 
@@ -13,17 +17,70 @@ from models import AlertPayload, CompanyConfig, StateRecord
 
 logger = logging.getLogger(__name__)
 
+# Network retry policy for transient connection failures.
 _MAX_FETCH_ATTEMPTS = 3
 _FETCH_BACKOFF_SECONDS = 5
+
+# Tags stripped before text extraction to reduce navigation/footer noise.
 _STRIP_TAGS = ("script", "style", "nav", "footer", "header")
+
+# Minimum novel content length to treat a diff as substantial.
+_MIN_SUBSTANTIAL_CHARS = 40
+
+# Minimum line length for a non-keyword diff segment to be job-relevant.
+_MIN_JOB_LINE_CHARS = 60
+
+# Default job-related terms used when scanning diff segments.
+_DEFAULT_JOB_TERMS: tuple[str, ...] = (
+    "intern",
+    "internship",
+    "co-op",
+    "co op",
+    "new grad",
+    "early career",
+)
+
+# Boilerplate phrases commonly found in cookie/consent banners.
+_BOILERPLATE_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"cookie",
+        r"privacy policy",
+        r"terms of (use|service)",
+        r"we use cookies",
+        r"accept all",
+        r"manage preferences",
+        r"gdpr",
+        r"ccpa",
+        r"sign in",
+        r"log in",
+        r"subscribe",
+    )
+)
 
 
 class CareerPageScraper:
+    """Fetches company careers pages and detects keyword-relevant content changes."""
+
     def __init__(self, settings: Settings) -> None:
+        """Initialize the scraper with runtime settings (timeouts, user agent, etc.)."""
         self._settings = settings
 
     def fetch(self, url: str) -> str | None:
+        """Fetch raw HTML from ``url``, retrying on connection errors.
+
+        Uses the configured user agent and request timeout. Retries up to three
+        times with a five-second pause between attempts when a connection error
+        occurs. Logs warnings on failure and never raises.
+
+        Args:
+            url: Careers page URL to retrieve.
+
+        Returns:
+            Raw response body as a string, or ``None`` if all attempts fail.
+        """
         headers = {"User-Agent": self._settings.user_agent}
+
         for attempt in range(1, _MAX_FETCH_ATTEMPTS + 1):
             try:
                 response = requests.get(
@@ -43,36 +100,197 @@ class CareerPageScraper:
                 )
                 if attempt < _MAX_FETCH_ATTEMPTS:
                     time.sleep(_FETCH_BACKOFF_SECONDS)
-            except (
-                requests.exceptions.HTTPError,
-                requests.exceptions.Timeout,
-                requests.exceptions.RequestException,
-            ) as exc:
-                logger.warning("Fetch failed for %s: %s", url, exc)
+            except requests.exceptions.HTTPError as exc:
+                logger.warning("HTTP error fetching %s: %s", url, exc)
                 return None
+            except requests.exceptions.Timeout as exc:
+                logger.warning("Timeout fetching %s: %s", url, exc)
+                return None
+            except requests.exceptions.RequestException as exc:
+                logger.warning("Request failed for %s: %s", url, exc)
+                return None
+
         return None
 
     def extract_text(self, html: str) -> str:
+        """Extract normalized visible text from HTML.
+
+        Parses with BeautifulSoup/lxml, removes script/style/nav/footer/header
+        elements, and returns lowercased stripped plain text.
+
+        Args:
+            html: Raw HTML document.
+
+        Returns:
+            Normalized page text suitable for hashing and keyword search.
+        """
         soup = BeautifulSoup(html, "lxml")
+
         for tag_name in _STRIP_TAGS:
             for tag in soup.find_all(tag_name):
                 tag.decompose()
-        return soup.get_text(separator=" ", strip=True).lower()
+
+        text = soup.get_text(separator=" ", strip=True)
+        return text.lower()
 
     def hash_content(self, text: str) -> str:
+        """Compute a SHA-256 hex digest of normalized page text.
+
+        Args:
+            text: Normalized text from :meth:`extract_text`.
+
+        Returns:
+            Lowercase hexadecimal SHA-256 digest.
+        """
         return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
     def check_keywords(self, text: str, keywords: list[str]) -> str | None:
+        """Return the first keyword found in ``text`` (case-insensitive).
+
+        Args:
+            text: Normalized page text (typically already lowercased).
+            keywords: Terms to search for, e.g. ``"intern"`` or ``"2027"``.
+
+        Returns:
+            The first matching keyword from ``keywords``, or ``None``.
+        """
+        lowered_text = text.lower()
         for keyword in keywords:
-            if keyword.lower() in text:
+            if keyword.lower() in lowered_text:
                 return keyword
         return None
+
+    def _normalize_diff_text(self, text: str) -> str:
+        """Collapse whitespace and strip punctuation-only noise from diff text."""
+        collapsed = re.sub(r"\s+", " ", text).strip()
+        if not collapsed:
+            return ""
+        if re.fullmatch(r"[\W_]+", collapsed):
+            return ""
+        return collapsed
+
+    def _is_boilerplate(self, text: str) -> bool:
+        """Return True when *text* looks like cookie, nav, or consent boilerplate."""
+        normalized = self._normalize_diff_text(text)
+        if not normalized:
+            return True
+        return any(pattern.search(normalized) for pattern in _BOILERPLATE_PATTERNS)
+
+    def _novel_diff_segments(self, old_text: str, new_text: str) -> list[str]:
+        """Return normalized text segments present in *new_text* but not *old_text*."""
+        matcher = difflib.SequenceMatcher(None, old_text, new_text)
+        segments: list[str] = []
+
+        for tag, _i1, _i2, j1, j2 in matcher.get_opcodes():
+            if tag not in ("insert", "replace"):
+                continue
+            segment = self._normalize_diff_text(new_text[j1:j2])
+            if segment and not self._is_boilerplate(segment):
+                segments.append(segment)
+
+        return segments
+
+    def _job_search_terms(self, keywords: list[str]) -> tuple[str, ...]:
+        """Merge configured keywords with default internship-related terms."""
+        merged = {term.lower() for term in keywords}
+        merged.update(_DEFAULT_JOB_TERMS)
+        return tuple(sorted(merged))
+
+    def _contains_job_term(self, text: str, job_terms: tuple[str, ...]) -> bool:
+        """Return True when *text* contains an internship-related search term."""
+        lowered = text.lower()
+        return any(term in lowered for term in job_terms)
+
+    def _find_job_snippet(
+        self,
+        old_text: str,
+        new_text: str,
+        keywords: list[str],
+    ) -> str | None:
+        """Return the best job-related snippet from a page diff, if any."""
+        job_terms = self._job_search_terms(keywords)
+        candidates: list[str] = []
+
+        for segment in self._novel_diff_segments(old_text, new_text):
+            if self._contains_job_term(segment, job_terms):
+                candidates.append(segment)
+            elif len(segment) >= _MIN_JOB_LINE_CHARS:
+                candidates.append(segment)
+
+        if not candidates:
+            return None
+
+        candidates.sort(key=len, reverse=True)
+        return candidates[0]
+
+    def _is_substantial_change(
+        self,
+        old_text: str,
+        new_text: str,
+        job_snippet: str | None,
+    ) -> bool:
+        """Return True when the diff contains meaningful new content."""
+        if job_snippet:
+            return True
+
+        segments = self._novel_diff_segments(old_text, new_text)
+        if not segments:
+            return False
+
+        total_chars = sum(len(segment) for segment in segments)
+        return total_chars >= _MIN_SUBSTANTIAL_CHARS
+
+    def get_diff_snippet(
+        self,
+        old_text: str,
+        new_text: str,
+        keywords: list[str] | None = None,
+    ) -> str:
+        """Summarize job-relevant content added between two text snapshots.
+
+        Prefers internship-related diff segments; falls back to the largest
+        non-boilerplate addition. Returns up to 300 characters.
+
+        Args:
+            old_text: Previous normalized page text.
+            new_text: Current normalized page text.
+            keywords: Optional configured keywords for job-term detection.
+
+        Returns:
+            A short human-readable snippet describing what changed.
+        """
+        keywords = keywords or []
+        job_snippet = self._find_job_snippet(old_text, new_text, keywords)
+        if job_snippet:
+            return f"New: {job_snippet[:280]}"
+
+        segments = self._novel_diff_segments(old_text, new_text)
+        if segments:
+            segments.sort(key=len, reverse=True)
+            return f"New: {segments[0][:280]}"
+
+        return "Page content changed"
 
     def poll_company(
         self,
         company: CompanyConfig,
         state: StateRecord,
     ) -> AlertPayload | None:
+        """Poll a single company careers page and optionally emit an alert.
+
+        Pipeline: fetch → extract text → hash → keyword check. Updates
+        ``state.last_hash``, ``state.last_text``, and ``state.last_checked`` on
+        every successful parse. Emits an :class:`AlertPayload` only when the
+        content hash changed, the diff is substantial, and either a keyword
+        matched or a job-related snippet appeared in the diff.
+
+        Args:
+            company: Company configuration (name, URL, keywords).
+            state: Mutable persisted state for this company.
+
+        Returns:
+            An alert payload when all alert conditions are met, else ``None``.
+        """
         now = datetime.now(timezone.utc)
         now_iso = now.isoformat()
 
@@ -84,14 +302,37 @@ class CareerPageScraper:
 
             text = self.extract_text(html)
             content_hash = self.hash_content(text)
+
+            previous_text = state.last_text or ""
             previous_hash = state.last_hash
             hash_changed = content_hash != previous_hash
 
             state.last_hash = content_hash
+            state.last_text = text
             state.last_checked = now_iso
 
+            if not hash_changed:
+                return None
+
+            # First successful poll seeds baseline text without alerting.
+            if not previous_hash:
+                logger.debug(
+                    "Seeding baseline for %s (hash=%s…)",
+                    company.name,
+                    content_hash[:8],
+                )
+                return None
+
+            job_snippet = self._find_job_snippet(previous_text, text, company.keywords)
+            if not self._is_substantial_change(previous_text, text, job_snippet):
+                logger.debug(
+                    "Ignoring trivial change for %s (no substantial diff)",
+                    company.name,
+                )
+                return None
+
             matched_keyword = self.check_keywords(text, company.keywords)
-            if not hash_changed or matched_keyword is None:
+            if matched_keyword is None and job_snippet is None:
                 return None
 
             if state.last_alerted is not None:
@@ -99,28 +340,35 @@ class CareerPageScraper:
                 elapsed = (now - last_alerted).total_seconds()
                 if elapsed <= self._settings.min_alert_interval:
                     logger.info(
-                        "Suppressing alert for %s: %.0fs since last (min %ds)",
+                        "Suppressing alert for %s: %.0fs since last alert "
+                        "(min interval %ds)",
                         company.name,
                         elapsed,
                         self._settings.min_alert_interval,
                     )
                     return None
 
-            diff_snippet = "Page content changed"
+            diff_snippet = self.get_diff_snippet(
+                previous_text,
+                text,
+                company.keywords,
+            )
+            trigger_keyword = matched_keyword or "job listing"
 
             state.last_alerted = now_iso
             state.alert_count += 1
+
             logger.info(
-                "Alert for %s keyword=%r count=%d",
+                "Alert triggered for %s (keyword=%r, alert_count=%d)",
                 company.name,
-                matched_keyword,
+                trigger_keyword,
                 state.alert_count,
             )
 
             return AlertPayload(
                 company=company.name,
                 url=company.url,
-                trigger_keyword=matched_keyword,
+                trigger_keyword=trigger_keyword,
                 detected_at=now_iso,
                 diff_snippet=diff_snippet,
             )

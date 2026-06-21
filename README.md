@@ -208,3 +208,11 @@ Upgrade to a paid Twilio account when you are ready to deploy long-term.
 | Import errors | Run `pip install -r requirements.txt` inside your virtualenv |
 
 Check `monitor.log` in the project root for detailed error messages.
+
+## Testing
+
+Run the scraper unit tests with pytest:
+
+```bash
+pytest tests/
+```
