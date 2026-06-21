@@ -79,3 +79,6 @@ def setup_logging() -> None:
     file_handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
     file_handler.setFormatter(formatter)
     root.addHandler(file_handler)
+
+    # Twilio's HTTP client logs full request URLs including the account SID.
+    logging.getLogger("twilio.http_client").setLevel(logging.WARNING)
