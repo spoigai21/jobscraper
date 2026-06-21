@@ -604,3 +604,151 @@ class TestWorkdayPagination:
         assert "data science intern" in text
         assert "seattle, wa" in text
         assert "austin, tx" in text
+
+
+MICROSOFT_URL = (
+    "https://apply.careers.microsoft.com/api/pcsx/search"
+    "?domain=microsoft.com&query=intern"
+)
+
+MICROSOFT_BOARD_JSON = json.dumps(
+    {
+        "positions": [
+            {
+                "id": 1970393556864498,
+                "name": "Software Engineering Intern - AI Frontiers",
+                "department": "Applied Sciences",
+                "locations": ["United States, Washington, Redmond"],
+                "positionUrl": "/careers/job/1970393556864498",
+            },
+            {
+                "id": 1970393556862611,
+                "name": "Business Program Management - Intern Opportunities",
+                "department": "Business Program Management",
+                "locations": ["Brazil, São Paulo, São Paulo"],
+                "positionUrl": "/careers/job/1970393556862611",
+            },
+        ],
+        "count": 2,
+    }
+)
+
+
+def _microsoft_position(position_id: int, title: str) -> dict[str, object]:
+    return {
+        "id": position_id,
+        "name": title,
+        "department": "Engineering",
+        "locations": ["Redmond, WA"],
+        "positionUrl": f"/careers/job/{position_id}",
+    }
+
+
+def _mock_microsoft_response(*, count: int, positions: list[dict[str, object]]) -> MagicMock:
+    response = MagicMock()
+    response.raise_for_status.return_value = None
+    response.json.return_value = {
+        "status": 200,
+        "data": {"positions": positions, "count": count},
+    }
+    return response
+
+
+class TestFetchMicrosoft:
+    @pytest.fixture
+    def scraper(self) -> CareerPageScraper:
+        return CareerPageScraper(_test_settings())
+
+    def test_paginates_until_count_reached(self, scraper: CareerPageScraper) -> None:
+        page_one = [
+            _microsoft_position(1000 + index, f"Intern Role {index}")
+            for index in range(10)
+        ]
+        page_two = [
+            _microsoft_position(2000 + index, f"Intern Role {10 + index}")
+            for index in range(5)
+        ]
+
+        with patch(
+            "monitor.scraper.requests.get",
+            side_effect=[
+                _mock_microsoft_response(count=15, positions=page_one),
+                _mock_microsoft_response(count=15, positions=page_two),
+            ],
+        ) as mock_get:
+            raw = scraper.fetch(MICROSOFT_URL)
+
+        assert mock_get.call_count == 2
+        payload = json.loads(raw)
+        assert len(payload["positions"]) == 15
+        assert payload["count"] == 15
+
+    def test_extract_text_from_microsoft_json(self, scraper: CareerPageScraper) -> None:
+        text = scraper.extract_text(MICROSOFT_BOARD_JSON, MICROSOFT_URL)
+        assert "software engineering intern - ai frontiers" in text
+        assert "applied sciences" in text
+
+
+class TestPollMicrosoftBoard:
+    @pytest.fixture
+    def microsoft_company(self) -> CompanyConfig:
+        return CompanyConfig(
+            name="Microsoft",
+            url=MICROSOFT_URL,
+            keywords=["internship", "engineering intern", "summer 2027"],
+            enabled=True,
+        )
+
+    @pytest.fixture
+    def profiled_scraper(self) -> CareerPageScraper:
+        return CareerPageScraper(_test_settings(), load_profile())
+
+    def test_first_poll_seeds_microsoft_job_ids_without_alert(
+        self,
+        profiled_scraper: CareerPageScraper,
+        microsoft_company: CompanyConfig,
+    ) -> None:
+        state = StateRecord(
+            company="Microsoft",
+            url=microsoft_company.url,
+            last_hash="",
+            last_checked="",
+            last_alerted=None,
+            alert_count=0,
+        )
+
+        with patch.object(
+            profiled_scraper, "fetch", return_value=MICROSOFT_BOARD_JSON
+        ):
+            result = profiled_scraper.poll_company(microsoft_company, state)
+
+        assert result == []
+        assert set(json.loads(state.seen_job_ids)) == {
+            "1970393556864498",
+            "1970393556862611",
+        }
+
+    def test_new_microsoft_intern_emits_scored_alert(
+        self,
+        profiled_scraper: CareerPageScraper,
+        microsoft_company: CompanyConfig,
+    ) -> None:
+        state = StateRecord(
+            company="Microsoft",
+            url=microsoft_company.url,
+            last_hash="seeded",
+            last_checked="",
+            last_alerted=(
+                datetime.now(timezone.utc) - timedelta(seconds=7200)
+            ).isoformat(),
+            alert_count=0,
+            seen_job_ids='["1970393556862611"]',
+        )
+
+        with patch.object(
+            profiled_scraper, "fetch", return_value=MICROSOFT_BOARD_JSON
+        ):
+            result = profiled_scraper.poll_company(microsoft_company, state)
+
+        assert len(result) == 1
+        assert result[0].job_title == "Software Engineering Intern - AI Frontiers"

@@ -6,9 +6,10 @@ import json
 import re
 from enum import Enum
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from monitor.models import JobPosting
+from monitor.parsers.meta import is_meta_jobs_url, parse_meta
 
 __all__ = [
     "BoardType",
@@ -21,6 +22,8 @@ __all__ = [
     "parse_greenhouse",
     "parse_job_board",
     "parse_lever",
+    "parse_meta",
+    "parse_microsoft",
     "parse_uber",
     "parse_workday",
 ]
@@ -32,8 +35,13 @@ class BoardType(str, Enum):
     LEVER = "lever"
     WORKDAY = "workday"
     UBER = "uber"
+    MICROSOFT = "microsoft"
+    META = "meta"
     HTML = "html"
     UNKNOWN = "unknown"
+
+
+MICROSOFT_CAREERS_BASE = "https://apply.careers.microsoft.com"
 
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
@@ -103,6 +111,10 @@ def detect_board_type(url: str) -> BoardType:
         return BoardType.WORKDAY
     if "uber.com/api/loadsearchjobsresults" in lowered:
         return BoardType.UBER
+    if "/api/pcsx/search" in lowered:
+        return BoardType.MICROSOFT
+    if is_meta_jobs_url(url):
+        return BoardType.META
     if url.startswith(("http://", "https://")):
         return BoardType.HTML
     return BoardType.UNKNOWN
@@ -272,6 +284,84 @@ def _workday_job_url(job: dict[str, Any], board_url: str) -> str:
     return f"{base}{external_path}"
 
 
+def _microsoft_location(job: dict[str, Any]) -> str:
+    locations = job.get("locations")
+    if isinstance(locations, list) and locations:
+        return str(locations[0])
+    standardized = job.get("standardizedLocations")
+    if isinstance(standardized, list) and standardized:
+        return str(standardized[0])
+    location = job.get("location")
+    if location:
+        return str(location)
+    return ""
+
+
+def _microsoft_job_url(job: dict[str, Any], board_url: str = "") -> str:
+    public_url = job.get("publicUrl")
+    if public_url:
+        return str(public_url)
+    position_url = str(job.get("positionUrl") or "")
+    if position_url:
+        if position_url.startswith(("http://", "https://")):
+            return position_url
+        parsed = urlparse(board_url)
+        base = (
+            f"{parsed.scheme}://{parsed.netloc}"
+            if board_url
+            else MICROSOFT_CAREERS_BASE
+        )
+        return f"{base}{position_url}"
+    job_id = job.get("id")
+    if job_id is not None:
+        return f"{MICROSOFT_CAREERS_BASE}/careers/job/{job_id}"
+    return ""
+
+
+def _microsoft_positions(raw_json: str | dict[str, Any]) -> list[Any]:
+    data = _load_json(raw_json)
+    if not isinstance(data, dict):
+        return []
+    positions = data.get("positions")
+    if isinstance(positions, list):
+        return positions
+    nested = data.get("data")
+    if isinstance(nested, dict):
+        positions = nested.get("positions")
+        if isinstance(positions, list):
+            return positions
+    return []
+
+
+def parse_microsoft(
+    raw_json: str | dict[str, Any],
+    company_name: str,
+    board_url: str = "",
+) -> list[JobPosting]:
+    postings: list[JobPosting] = []
+
+    for job in _microsoft_positions(raw_json):
+        if not isinstance(job, dict):
+            continue
+        job_id = job.get("id")
+        if job_id is None:
+            continue
+        description = _strip_html(str(job.get("jobDescription") or ""))
+        postings.append(
+            JobPosting(
+                id=str(job_id),
+                title=str(job.get("name") or ""),
+                department=str(job.get("department") or ""),
+                location=_microsoft_location(job),
+                url=_microsoft_job_url(job, board_url),
+                description=description,
+                company_name=company_name,
+            )
+        )
+
+    return postings
+
+
 def parse_workday(
     raw_json: str | dict[str, Any],
     company_name: str,
@@ -318,6 +408,10 @@ def parse_job_board(
         return parse_uber(raw_json, company_name)
     if board_type == BoardType.WORKDAY:
         return parse_workday(raw_json, company_name, board_url=url)
+    if board_type == BoardType.MICROSOFT:
+        return parse_microsoft(raw_json, company_name, board_url=url)
+    if board_type == BoardType.META:
+        return parse_meta(raw_json, company_name)
     return []
 
 

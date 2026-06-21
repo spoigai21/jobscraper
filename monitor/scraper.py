@@ -22,7 +22,14 @@ from monitor.parsers.boards import (
     jobs_to_text,
     parse_job_board,
 )
+from monitor.parsers.meta import fetch_meta_search_raw, is_meta_jobs_url
 from monitor.parsers.nasa import is_nasa_company, nasa_jobs_to_text, parse_nasa_html
+from monitor.parsers.tesla import (
+    TeslaScraper,
+    is_tesla_company,
+    parse_tesla_state,
+    tesla_jobs_to_text,
+)
 from monitor.models import AlertPayload, CompanyConfig, JobPosting, StateRecord
 from monitor.profile import UserProfile
 from monitor.scoring import classify_tier, score_job, should_exclude
@@ -45,6 +52,9 @@ _MIN_JOB_LINE_CHARS = 60
 # Workday cxs job-search page size (API returns HTTP 400 when limit > 20).
 _WORKDAY_REQUESTED_PAGE_LIMIT = 50
 _WORKDAY_PAGE_LIMIT = 20
+
+# Eightfold PCSX search returns 10 results per page regardless of limit param.
+_MICROSOFT_PAGE_SIZE = 10
 
 # Default job-related terms used when scanning diff segments.
 _DEFAULT_JOB_TERMS: tuple[str, ...] = (
@@ -127,6 +137,8 @@ class CareerPageScraper:
             BoardType.LEVER,
             BoardType.UBER,
             BoardType.WORKDAY,
+            BoardType.MICROSOFT,
+            BoardType.META,
         )
 
     @staticmethod
@@ -154,6 +166,7 @@ class CareerPageScraper:
                 "api.lever.co/v0/postings",
                 "/wday/cxs/",
                 "uber.com/api/loadsearchjobsresults",
+                "/api/pcsx/search",
             )
         )
 
@@ -171,6 +184,22 @@ class CareerPageScraper:
     def _uber_search_query(url: str) -> str:
         query = parse_qs(urlparse(url).query)
         values = query.get("query") or query.get("q") or ["intern"]
+        return values[0]
+
+    @staticmethod
+    def _is_microsoft_pcsx_url(url: str) -> bool:
+        return "/api/pcsx/search" in url.lower()
+
+    @staticmethod
+    def _microsoft_search_query(url: str) -> str:
+        query = parse_qs(urlparse(url).query)
+        values = query.get("query") or query.get("keywords") or ["intern"]
+        return values[0]
+
+    @staticmethod
+    def _microsoft_domain(url: str) -> str:
+        query = parse_qs(urlparse(url).query)
+        values = query.get("domain") or ["microsoft.com"]
         return values[0]
 
     @staticmethod
@@ -259,6 +288,57 @@ class CareerPageScraper:
             }
         )
 
+    def _fetch_microsoft(self, url: str, headers: dict[str, str]) -> str:
+        """Paginate Microsoft Eightfold PCSX job search and return aggregated JSON."""
+        parsed = urlparse(url.split("?", 1)[0])
+        request_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+        domain = self._microsoft_domain(url)
+        search_query = self._microsoft_search_query(url)
+        all_positions: list[dict] = []
+        total: int | None = None
+        start = 0
+
+        while True:
+            response = requests.get(
+                request_url,
+                params={
+                    "domain": domain,
+                    "query": search_query,
+                    "location": "",
+                    "start": start,
+                    "num": _MICROSOFT_PAGE_SIZE,
+                },
+                headers=headers,
+                timeout=self._settings.request_timeout,
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            batch = data.get("data", {}).get("positions") or []
+            if total is None:
+                nested_total = data.get("data", {}).get("count")
+                if isinstance(nested_total, int):
+                    total = nested_total
+
+            if not batch:
+                break
+
+            all_positions.extend(batch)
+
+            if len(batch) < _MICROSOFT_PAGE_SIZE:
+                break
+            if total is not None and len(all_positions) >= total:
+                break
+
+            start += _MICROSOFT_PAGE_SIZE
+
+        return json.dumps(
+            {
+                "positions": all_positions,
+                "count": total if total is not None else len(all_positions),
+            }
+        )
+
     def _extract_text_from_json(self, raw: str, url: str) -> str:
         """Flatten public job-board JSON into searchable plain text."""
         board_type = detect_board_type(url)
@@ -295,6 +375,12 @@ class CareerPageScraper:
         elif "uber.com/api/loadsearchjobsresults" in lowered_url:
             jobs = parse_job_board(raw, url, "")
             return jobs_to_text(jobs)
+        elif "/api/pcsx/search" in lowered_url:
+            jobs = parse_job_board(raw, url, "")
+            return jobs_to_text(jobs)
+        elif is_meta_jobs_url(url):
+            jobs = parse_job_board(raw, url, "")
+            return jobs_to_text(jobs)
 
         return " ".join(part for part in parts if part).lower()
 
@@ -321,6 +407,14 @@ class CareerPageScraper:
                     return self._fetch_workday(url, headers, request_url)
                 if self._is_uber_jobs_api_url(url):
                     return self._fetch_uber(url, headers)
+                if self._is_microsoft_pcsx_url(url):
+                    return self._fetch_microsoft(url, headers)
+                if is_meta_jobs_url(url):
+                    return fetch_meta_search_raw(
+                        url,
+                        user_agent=self._settings.user_agent,
+                        timeout=self._settings.request_timeout,
+                    )
                 else:
                     response = requests.get(
                         request_url,
@@ -717,6 +811,84 @@ class CareerPageScraper:
 
         return alerts
 
+    def _poll_tesla(
+        self,
+        company: CompanyConfig,
+        state: StateRecord,
+        now: datetime,
+        now_iso: str,
+    ) -> list[AlertPayload]:
+        """Detect new internship listings from Tesla careers state JSON."""
+        tesla_scraper = TeslaScraper(self._settings)
+        raw = tesla_scraper.fetch_state(company.url)
+        if raw is None:
+            state.last_checked = now_iso
+            return []
+
+        jobs = parse_tesla_state(raw, company.name, source_url=company.url)
+        current_ids = {job.id for job in jobs}
+        seen_ids = self._load_seen_job_ids(state)
+
+        text = tesla_jobs_to_text(jobs)
+        state.last_hash = self.hash_content(text)
+        state.last_text = text
+        state.last_checked = now_iso
+
+        if not seen_ids:
+            self._save_seen_job_ids(state, current_ids)
+            logger.debug(
+                "Seeding Tesla job IDs for %s (%d listings)",
+                company.name,
+                len(current_ids),
+            )
+            return []
+
+        new_jobs = [job for job in jobs if job.id not in seen_ids]
+        self._save_seen_job_ids(state, current_ids)
+
+        if not new_jobs:
+            return []
+
+        alerts = [
+            payload
+            for job in new_jobs
+            if (payload := self._build_job_alert(job, company, now_iso)) is not None
+        ]
+        if not alerts:
+            logger.debug(
+                "Ignoring %d new Tesla listings for %s (filtered out)",
+                len(new_jobs),
+                company.name,
+            )
+            return []
+
+        if state.last_alerted is not None:
+            last_alerted = datetime.fromisoformat(state.last_alerted)
+            elapsed = (now - last_alerted).total_seconds()
+            if elapsed <= self._settings.min_alert_interval:
+                logger.info(
+                    "Suppressing alert for %s: %.0fs since last alert "
+                    "(min interval %ds)",
+                    company.name,
+                    elapsed,
+                    self._settings.min_alert_interval,
+                )
+                return []
+
+        state.last_alerted = now_iso
+        state.alert_count += len(alerts)
+
+        for payload in alerts:
+            logger.info(
+                "Alert triggered for %s (%r, score=%d, tier=%s)",
+                company.name,
+                payload.job_title or payload.trigger_keyword,
+                payload.relevance_score,
+                payload.tier,
+            )
+
+        return alerts
+
     def poll_company(
         self,
         company: CompanyConfig,
@@ -742,6 +914,9 @@ class CareerPageScraper:
         try:
             if is_nasa_company(company.name):
                 return self._poll_nasa(company, state, now, now_iso)
+
+            if is_tesla_company(company.name):
+                return self._poll_tesla(company, state, now, now_iso)
 
             html = self.fetch(company.url)
             if html is None:

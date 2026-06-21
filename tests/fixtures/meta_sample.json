@@ -1,0 +1,61 @@
+{
+  "data": {
+    "job_search_with_featured_jobs": {
+      "all_jobs": [
+        {
+          "id": "1760132191666571",
+          "title": "Research Scientist Intern, Audio Quality with AI (PhD)",
+          "locations": [
+            "Redmond, WA"
+          ],
+          "teams": [
+            "AI Research",
+            "Research"
+          ],
+          "sub_teams": [
+            "Research"
+          ]
+        },
+        {
+          "id": "2774289902955470",
+          "title": "Research Scientist Intern, State Estimation for Dexterous Manipulation (PhD)",
+          "locations": [
+            "Redmond, WA"
+          ],
+          "teams": [
+            "AI Research",
+            "Artificial Intelligence",
+            "Facebook Reality Labs",
+            "Internship - PhD",
+            "Research",
+            "University Grad - PhD & Postdoc"
+          ],
+          "sub_teams": [
+            "Artificial Intelligence",
+            "Hardware",
+            "Research"
+          ]
+        },
+        {
+          "id": "771948392580541",
+          "title": "Research Scientist Intern, AI/ML, Core Ads Growth (PhD)",
+          "locations": [
+            "Zurich, Switzerland",
+            "London, UK"
+          ],
+          "teams": [
+            "AI Research",
+            "Artificial Intelligence",
+            "Internship - PhD",
+            "Research"
+          ],
+          "sub_teams": [
+            "Artificial Intelligence",
+            "Machine Learning",
+            "Research"
+          ]
+        }
+      ]
+    }
+  }
+}

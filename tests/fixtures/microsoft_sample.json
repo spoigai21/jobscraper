@@ -1,0 +1,36 @@
+{
+  "status": 200,
+  "data": {
+    "count": 3,
+    "positions": [
+      {
+        "id": 1970393556835496,
+        "displayJobId": "200031430",
+        "name": "PHD Research Sciences INTERN",
+        "locations": ["India, Multiple Locations, Multiple Locations"],
+        "standardizedLocations": ["IN"],
+        "department": "Research Sciences",
+        "positionUrl": "/careers/job/1970393556835496"
+      },
+      {
+        "id": 1970393556864498,
+        "displayJobId": "200036961",
+        "name": "Research Intern - AI Frontiers",
+        "locations": ["United States, Washington, Redmond"],
+        "standardizedLocations": ["Redmond, WA, US"],
+        "department": "Applied Sciences",
+        "positionUrl": "/careers/job/1970393556864498",
+        "jobDescription": "<p>Research Internships at Microsoft provide a dynamic environment.</p>"
+      },
+      {
+        "id": 1970393556862611,
+        "displayJobId": "200036277",
+        "name": "Business Program Management - Intern Opportunities",
+        "locations": ["Brazil, São Paulo, São Paulo"],
+        "standardizedLocations": ["São Paulo, SP, BR"],
+        "department": "Business Program Management",
+        "positionUrl": "/careers/job/1970393556862611"
+      }
+    ]
+  }
+}

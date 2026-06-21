@@ -17,6 +17,7 @@ from monitor.parsers.boards import (
     parse_greenhouse,
     parse_job_board,
     parse_lever,
+    parse_microsoft,
     parse_uber,
     parse_workday,
 )
@@ -47,6 +48,14 @@ class TestDetectBoardType:
             (
                 "https://www.uber.com/api/loadSearchJobsResults?localeCode=en&query=intern",
                 BoardType.UBER,
+            ),
+            (
+                "https://apply.careers.microsoft.com/api/pcsx/search?domain=microsoft.com&query=intern",
+                BoardType.MICROSOFT,
+            ),
+            (
+                "https://www.metacareers.com/jobsearch?q=intern",
+                BoardType.META,
             ),
             ("https://careers.google.com/jobs", BoardType.HTML),
         ],
@@ -169,6 +178,67 @@ class TestParseUber:
         jobs = parse_job_board(raw, url, "Uber")
         assert len(jobs) == 1
         assert jobs[0].title == "Software Engineering Intern"
+
+
+class TestParseMicrosoft:
+    @pytest.fixture
+    def microsoft_json(self) -> dict:
+        return json.loads(
+            (FIXTURES_DIR / "microsoft_sample.json").read_text(encoding="utf-8")
+        )
+
+    def test_parses_sample_fixture(self, microsoft_json: dict) -> None:
+        board_url = (
+            "https://apply.careers.microsoft.com/api/pcsx/search"
+            "?domain=microsoft.com&query=intern"
+        )
+        jobs = parse_microsoft(microsoft_json, "Microsoft", board_url=board_url)
+
+        assert len(jobs) == 3
+        intern_job = jobs[1]
+        assert intern_job.id == "1970393556864498"
+        assert intern_job.title == "Research Intern - AI Frontiers"
+        assert intern_job.department == "Applied Sciences"
+        assert intern_job.location == "United States, Washington, Redmond"
+        assert intern_job.url.endswith("/careers/job/1970393556864498")
+        assert intern_job.company_name == "Microsoft"
+        assert "Research Internships at Microsoft" in intern_job.description
+
+    def test_parses_aggregated_fetch_payload(self) -> None:
+        raw = {
+            "positions": [
+                {
+                    "id": 123,
+                    "name": "Software Engineering Intern",
+                    "department": "Engineering",
+                    "locations": ["Redmond, WA"],
+                    "positionUrl": "/careers/job/123",
+                }
+            ],
+            "count": 1,
+        }
+        jobs = parse_microsoft(raw, "Microsoft")
+        assert len(jobs) == 1
+        assert jobs[0].title == "Software Engineering Intern"
+
+    def test_routes_to_microsoft_parser(self, microsoft_json: dict) -> None:
+        url = (
+            "https://apply.careers.microsoft.com/api/pcsx/search"
+            "?domain=microsoft.com&query=intern"
+        )
+        jobs = parse_job_board(microsoft_json, url, "Microsoft")
+        assert len(jobs) == 3
+
+
+class TestParseMeta:
+    def test_routes_to_meta_parser(self) -> None:
+        raw = json.loads(
+            (FIXTURES_DIR / "meta_sample.json").read_text(encoding="utf-8")
+        )
+        url = "https://www.metacareers.com/jobsearch?q=intern"
+        jobs = parse_job_board(raw, url, "Meta")
+        assert len(jobs) == 3
+        assert jobs[0].company_name == "Meta"
 
 
 class TestParseJobBoard:

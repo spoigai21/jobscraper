@@ -51,9 +51,9 @@ COMPANIES: list[CompanyConfig] = [
     ),
     CompanyConfig(
         name="Meta",
-        url="https://www.metacareers.com/jobsearch/",
+        url="https://www.metacareers.com/jobsearch?q=intern",
         keywords=FILTERED_INTERN_KEYWORDS,
-        enabled=False,  # Greenhouse board 404; no public JSON job-search API (Comet GraphQL)
+        enabled=True,  # Comet GraphQL job search (CareersJobSearchResultsDataQuery)
     ),
     CompanyConfig(
         name="Amazon",
@@ -81,9 +81,12 @@ COMPANIES: list[CompanyConfig] = [
     ),
     CompanyConfig(
         name="Microsoft",
-        url="https://careers.microsoft.com/us/en/search-results?keywords=intern",
+        url=(
+            "https://apply.careers.microsoft.com/api/pcsx/search"
+            "?domain=microsoft.com&query=intern"
+        ),
         keywords=STRICT_INTERN_KEYWORDS,
-        enabled=False,  # SPA (Eightfold); listings load via JS, not in static HTML
+        enabled=True,  # Eightfold PCSX search API (GET, paginated)
     ),
     CompanyConfig(
         name="Uber",
@@ -105,7 +108,7 @@ COMPANIES: list[CompanyConfig] = [
     ),
     CompanyConfig(
         name="Zoox",
-        url="https://jobs.lever.co/zoox?commitment=Internship%2FCo-op",
+        url="https://api.lever.co/v0/postings/zoox?commitment=Internship%2FCo-op",
         keywords=FILTERED_INTERN_KEYWORDS,
         enabled=True,
     ),
@@ -171,14 +174,9 @@ COMPANIES: list[CompanyConfig] = [
     ),
     CompanyConfig(
         name="Relativity",
-        url="https://www.relativityspace.com/internship-positions",
-        keywords=[
-            "internship",
-            "engineering intern",
-            "summer 2027",
-            "accepting applications",
-        ],
-        enabled=True,
+        url="https://boards-api.greenhouse.io/v1/boards/relativity/jobs?content=true",
+        keywords=FILTERED_INTERN_KEYWORDS,
+        enabled=True,  # Greenhouse API; internship-positions page is Squarespace marketing
     ),
     CompanyConfig(
         name="Firefly",
@@ -408,6 +406,6 @@ COMPANIES: list[CompanyConfig] = [
         name="Tesla",
         url="https://www.tesla.com/careers/search/?type=3&query=intern",
         keywords=STRICT_INTERN_KEYWORDS,
-        enabled=False,  # Blocks automated requests (403)
+        enabled=False,  # Akamai Bot Manager blocks datacenter fetches (403/429/challenge)
     ),
 ]

@@ -1,0 +1,62 @@
+{
+  "lookup": {
+    "departments": {
+      "10": "Software Engineering",
+      "20": "Manufacturing"
+    },
+    "locations": {
+      "100": "Palo Alto, CA",
+      "101": "Berlin, Germany",
+      "102": "Austin, TX"
+    },
+    "types": {
+      "1": "fulltime",
+      "2": "parttime",
+      "3": "intern",
+      "4": "seasonal"
+    }
+  },
+  "geo": [
+    {
+      "sites": [
+        {
+          "id": "US",
+          "cities": {
+            "CA": ["100"],
+            "TX": ["102"]
+          }
+        }
+      ]
+    }
+  ],
+  "listings": [
+    {
+      "id": "12345",
+      "t": "Software Engineering Intern",
+      "dp": "10",
+      "l": "100",
+      "y": "3"
+    },
+    {
+      "id": "12346",
+      "t": "Production Associate",
+      "dp": "20",
+      "l": "100",
+      "y": "1"
+    },
+    {
+      "id": "12347",
+      "t": "Firmware Intern",
+      "dp": "10",
+      "l": "101",
+      "y": "3"
+    },
+    {
+      "id": "12348",
+      "t": "Controls Engineering Intern",
+      "dp": "10",
+      "l": "102",
+      "y": "3"
+    }
+  ]
+}
