@@ -1,0 +1,228 @@
+# Savir Khanna — internship monitor profile (Class of 2028, calendar 2027 cycles)
+
+user:
+  name: Savir Khanna
+  school: Northeastern University
+  degree: BS Data Science & Physics
+  grad_year: 2028
+  graduation: June 2028
+
+target_cycle_year: 2027
+
+cycle_keywords:
+  - spring 2027
+  - summer 2027
+  - fall 2027
+  - co-op 2027
+  - intern
+  - internship
+  - co-op
+  - residency
+
+location:
+  countries:
+    - US
+    - USA
+    - United States
+  remote_ok: true
+
+roles_include:
+  - software engineer
+  - swe
+  - sde
+  - software development
+  - perception
+  - computer vision
+  - cv
+  - autonomy
+  - av
+  - machine learning
+  - ml
+  - ml engineer
+  - ai engineer
+  - applied scientist
+  - research engineer
+  - data science
+  - data scientist
+  - data engineer
+  - analytics engineer
+  - platform
+  - infrastructure
+  - infra
+  - devops
+  - sre
+  - site reliability
+  - backend
+  - frontend
+  - full stack
+  - robotics software
+  - simulation
+  - mapping
+  - localization
+  - cloud
+  - distributed systems
+
+roles_exclude:
+  - marketing
+  - sales
+  - business development
+  - hr
+  - human resources
+  - recruiting
+  - finance
+  - accounting
+  - legal
+  - communications
+  - customer success
+  - brand
+  - social media
+  - firmware
+  - fpga
+  - asic
+  - rtl
+  - verilog
+  - vhdl
+  - pcb design
+  - analog engineer
+  - chip design
+  - hardware engineer
+  - electrical engineer intern
+
+level_exclude:
+  - graduate intern
+  - grad intern
+  - master's
+  - masters
+  - ms student
+  - phd
+  - doctorate
+  - postdoc
+  - mba
+  - advanced degree
+  - doctoral
+  - pursuing a graduate
+  - currently enrolled in a graduate
+
+skills_strong:
+  - python
+  - pytorch
+  - opencv
+  - yolo
+  - fastapi
+  - flask
+  - react
+  - docker
+  - redis
+  - postgresql
+  - aws
+  - gcp
+  - xgboost
+  - scikit-learn
+  - rag
+  - llm
+  - microservices
+  - rest
+
+skills_bonus:
+  - typescript
+  - javascript
+  - sql
+  - pandas
+  - numpy
+  - streamlit
+  - gradio
+  - onnx
+  - firestore
+  - ci/cd
+  - lightgbm
+  - mediapipe
+
+prestige:
+  tier_s:
+    - Google
+    - Meta
+    - Apple
+    - Amazon
+    - Microsoft
+    - NVIDIA
+    - OpenAI
+    - Anthropic
+  tier_a:
+    - Stripe
+    - Databricks
+    - Datadog
+    - Snowflake
+    - Notion
+    - Robinhood
+    - Uber
+    - Waymo
+    - Scale AI
+    - Netflix
+    - LinkedIn
+    - Salesforce
+    - Airbnb
+    - Pinterest
+  tier_b:
+    - SpaceX
+    - Zoox
+    - Skydio
+    - Nuro
+    - Blue Origin
+    - Rocket Lab
+    - Planet Labs
+    - Relativity
+    - Muon Space
+    - Astranis
+    - NASA
+    - JPL
+    - Anduril
+    - Aurora
+    - Applied Intuition
+    - Tesla
+  tier_c:
+    - Visa
+    - Coinbase
+    - Plaid
+    - Ramp
+    - Brex
+    - DoorDash
+    - Instacart
+    - Lyft
+    - Cloudflare
+    - MongoDB
+    - Figma
+    - Discord
+    - Snap
+    - Reddit
+    - Palantir
+    - Adobe
+    - IBM
+    - ByteDance
+    - TikTok
+
+scoring:
+  title_dream_role: 4
+  title_swe_role: 3
+  title_data_role: 3
+  department_engineering: 2
+  skill_strong_match: 1
+  skill_strong_cap: 3
+  skill_bonus_match: 1
+  skill_bonus_cap: 2
+  prestige_tier_s: 4
+  prestige_tier_a: 3
+  prestige_tier_b: 2
+  prestige_tier_c: 1
+  space_perception_bonus: 2
+
+alerts:
+  standard:
+    channels:
+      - push
+  high:
+    score_threshold: 7
+    channels:
+      - push
+      - call
+      - sms
+      - email

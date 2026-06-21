@@ -153,7 +153,7 @@ Edit `companies.py` to add, remove, or tune which career pages are monitored. Ea
 CompanyConfig(
     name="Stripe",
     url="https://stripe.com/jobs/search?query=intern",
-    keywords=["intern", "internship", "2027", "2026"],
+    keywords=["intern", "internship", "2027", "summer 2027", "co-op"],
     enabled=True,
 ),
 ```

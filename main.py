@@ -11,11 +11,23 @@ from alerts import AlertManager
 from companies import COMPANIES
 from config import Settings, get_settings, setup_logging
 from models import CompanyConfig, StateRecord
+from profile import UserProfile, load_profile
 from scraper import CareerPageScraper
 from storage import StateStore
 
 logger = logging.getLogger(__name__)
 PACIFIC = ZoneInfo("America/Los_Angeles")
+
+
+def _load_user_profile() -> UserProfile | None:
+    try:
+        return load_profile()
+    except FileNotFoundError:
+        logger.warning("profile.yaml not found; scoring profile unavailable")
+        return None
+    except ValueError as exc:
+        logger.error("Invalid profile.yaml: %s", exc)
+        return None
 
 
 def get_poll_interval(settings: Settings | None = None) -> int:
@@ -51,13 +63,16 @@ def run_poll_cycle(
     for company in enabled:
         try:
             state = store.get_state(company.name) or _default_state(company)
-            payload = scraper.poll_company(company, state)
+            payloads = scraper.poll_company(company, state)
 
-            if payload is not None:
-                results = alert_manager.fire_all(payload)
-                store.log_alert(payload, results)
-                alerts_fired += 1
-                print(f"ALERT {company.name} ({payload.trigger_keyword})")
+            if payloads:
+                for payload in payloads:
+                    results = alert_manager.fire(payload)
+                    store.log_alert(payload, results)
+                    alerts_fired += 1
+                    label = payload.job_title or payload.trigger_keyword
+                    tier_tag = f" [{payload.tier}]" if payload.tier != "standard" else ""
+                    print(f"ALERT {company.name} ({label}){tier_tag}")
             else:
                 print(f"OK   {company.name}")
 
@@ -87,8 +102,15 @@ def _poll_and_reschedule(
 def main() -> None:
     setup_logging()
     settings = get_settings()
+    profile = _load_user_profile()
+    if profile is not None:
+        logger.info(
+            "Loaded profile for %s (high tier threshold=%d)",
+            profile.user.name,
+            profile.alerts.high_score_threshold,
+        )
     store = StateStore()
-    scraper = CareerPageScraper(settings)
+    scraper = CareerPageScraper(settings, profile)
     alert_manager = AlertManager(settings)
 
     logger.info("Internship monitor starting")

@@ -1,0 +1,20 @@
+{
+  "jobs": [
+    {
+      "id": 4012345,
+      "title": "Computer Vision Intern — Perception",
+      "absolute_url": "https://boards.greenhouse.io/waymo/jobs/4012345",
+      "location": { "name": "Mountain View, CA" },
+      "departments": [{ "name": "Perception Engineering" }],
+      "content": "<p>Build <strong>YOLO</strong> detectors with <em>PyTorch</em> and OpenCV for autonomy stacks. Summer 2027 cohort.</p>"
+    },
+    {
+      "id": 4012346,
+      "title": "Internal Communications Coordinator",
+      "absolute_url": "https://boards.greenhouse.io/waymo/jobs/4012346",
+      "location": { "name": "Remote" },
+      "departments": [{ "name": "Communications" }],
+      "content": "<p>Support internal employee newsletters.</p>"
+    }
+  ]
+}

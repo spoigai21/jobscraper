@@ -11,7 +11,8 @@ import requests
 from twilio.rest import Client
 
 from config import Settings
-from models import AlertPayload
+from models import AlertPayload, AlertTier
+from profile import AlertChannel, UserProfile
 
 logger = logging.getLogger(__name__)
 
@@ -30,15 +31,31 @@ class AlertManager:
                 settings.twilio_auth_token,
             )
 
+    def _apply_url(self, payload: AlertPayload) -> str:
+        return payload.job_url or payload.url
+
+    def _headline(self, payload: AlertPayload) -> str:
+        if payload.job_title:
+            return f"{payload.company} — {payload.job_title}"
+        return payload.company
+
+    def _score_line(self, payload: AlertPayload) -> str:
+        if payload.relevance_score > 0:
+            return f"Score {payload.relevance_score}"
+        return ""
+
     def send_sms(self, payload: AlertPayload) -> bool:
         if not self._twilio_client:
             logger.error("SMS skipped: Twilio credentials are not configured")
             return False
 
+        apply_url = self._apply_url(payload)
+        score_line = self._score_line(payload)
         body = (
-            f"INTERN ALERT: {payload.company} just posted internships!\n"
+            f"INTERN ALERT: {self._headline(payload)}\n"
+            f"{score_line + chr(10) if score_line else ''}"
             f"Keyword: {payload.trigger_keyword}\n"
-            f"Apply NOW: {payload.url}\n"
+            f"Apply NOW: {apply_url}\n"
             f"Detected: {payload.detected_at}"
         )
 
@@ -59,16 +76,27 @@ class AlertManager:
             logger.error("Voice call skipped: Twilio credentials are not configured")
             return False
 
+        title_part = (
+            f"{payload.job_title} at {payload.company}"
+            if payload.job_title
+            else f"{payload.company} internship"
+        )
+        score_part = (
+            f" Relevance score {payload.relevance_score}."
+            if payload.relevance_score > 0
+            else ""
+        )
+
         twiml = (
             "<Response>"
             "<Say voice='Polly.Matthew'>"
-            f"{payload.company} internship alert. {payload.company} has posted a new internship "
-            f"listing. The keyword {payload.trigger_keyword} was detected on their careers. "
-            "Godspeed and good fucking yard."
+            f"High priority internship alert. {title_part}.{score_part} "
+            f"The keyword {payload.trigger_keyword} was detected. "
+            "Check your messages now."
             "</Say>"
             "<Pause length='1'/>"
             "<Say voice='Polly.Matthew'>"
-            f"Repeating. {payload.company} internship detected. Check your messages now."
+            f"Repeating. {title_part}. Apply immediately."
             "</Say>"
             "</Response>"
         )
@@ -90,14 +118,25 @@ class AlertManager:
             logger.error("Push skipped: NTFY_TOPIC is not configured")
             return False
 
+        apply_url = self._apply_url(payload)
         url = f"{NTFY_BASE_URL}/{self._settings.ntfy_topic}"
+        is_high = payload.tier == "high"
+        score_line = self._score_line(payload)
         headers = {
-            "Title": f"INTERN ALERT: {payload.company} Internship Posted!",
-            "Priority": "urgent",
-            "Tags": "rotating_light,briefcase",
-            "Click": payload.url,
+            "Title": (
+                f"{'🔥 ' if is_high else ''}{self._headline(payload)}"
+            ),
+            "Priority": "urgent" if is_high else "default",
+            "Tags": "rotating_light,briefcase" if is_high else "briefcase",
+            "Click": apply_url,
         }
-        body = f"Keyword '{payload.trigger_keyword}' detected. Apply within 3 hours!"
+        body_parts = [f"Keyword '{payload.trigger_keyword}' detected."]
+        if score_line:
+            body_parts.append(f"{score_line} · Apply within 3 hours!")
+        else:
+            body_parts.append("Apply within 3 hours!")
+        body_parts.append(f"Link: {apply_url}")
+        body = " ".join(body_parts)
 
         try:
             response = requests.post(
@@ -124,11 +163,15 @@ class AlertManager:
             logger.error("Email skipped: Gmail SMTP credentials are not configured")
             return False
 
-        subject = f"INTERN ALERT: {payload.company} posted internships - apply NOW"
+        apply_url = self._apply_url(payload)
+        score_line = self._score_line(payload)
+        subject = f"INTERN ALERT: {self._headline(payload)} - apply NOW"
         body = (
-            f"Internship alert for {payload.company}\n"
+            f"Internship alert for {self._headline(payload)}\n"
+            f"Tier: {payload.tier}\n"
+            f"{score_line + chr(10) if score_line else ''}"
             f"Keyword: {payload.trigger_keyword}\n"
-            f"Apply: {payload.url}\n"
+            f"Apply: {apply_url}\n"
             f"Detected: {payload.detected_at}\n\n"
             f"Change preview:\n{payload.diff_snippet}\n\n"
             "Sent by your internship monitor"
@@ -159,16 +202,20 @@ class AlertManager:
             logger.exception("Failed to send email for %s", payload.company)
             return False
 
-    def fire_all(self, payload: AlertPayload) -> dict[str, bool]:
+    def fire(self, payload: AlertPayload) -> dict[str, bool]:
+        """Route alerts by tier: standard is push-only, high uses all channels."""
         channels = {"sms": False, "call": False, "push": False, "email": False}
-        tasks = {
-            "sms": self.send_sms,
-            "call": self.send_voice_call,
-            "push": self.send_push,
-            "email": self.send_email,
-        }
+        if payload.tier == "high":
+            tasks = {
+                "push": self.send_push,
+                "call": self.send_voice_call,
+                "sms": self.send_sms,
+                "email": self.send_email,
+            }
+        else:
+            tasks = {"push": self.send_push}
 
-        with ThreadPoolExecutor(max_workers=4) as executor:
+        with ThreadPoolExecutor(max_workers=len(tasks)) as executor:
             future_to_channel = {
                 executor.submit(handler, payload): name
                 for name, handler in tasks.items()
@@ -178,14 +225,26 @@ class AlertManager:
                 try:
                     channels[name] = bool(future.result())
                 except Exception:
-                    logger.exception("Unexpected error in %s alert for %s", name, payload.company)
+                    logger.exception(
+                        "Unexpected error in %s alert for %s", name, payload.company
+                    )
                     channels[name] = False
 
         ok = [n for n, v in channels.items() if v]
         bad = [n for n, v in channels.items() if not v]
         if ok:
-            logger.info("Alert succeeded for %s: %s", payload.company, ", ".join(ok))
+            logger.info(
+                "Alert succeeded for %s (%s tier): %s",
+                payload.company,
+                payload.tier,
+                ", ".join(ok),
+            )
         if bad:
-            logger.warning("Alert failed for %s: %s", payload.company, ", ".join(bad))
+            logger.warning(
+                "Alert failed for %s (%s tier): %s",
+                payload.company,
+                payload.tier,
+                ", ".join(bad),
+            )
 
         return channels

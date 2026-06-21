@@ -1,6 +1,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
+
+AlertTier = Literal["standard", "high"]
+
+
+@dataclass(frozen=True, slots=True)
+class JobPosting:
+    id: str
+    title: str
+    department: str
+    location: str
+    url: str
+    description: str
+    company_name: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,6 +32,10 @@ class AlertPayload:
     trigger_keyword: str
     detected_at: str
     diff_snippet: str
+    job_title: str = ""
+    job_url: str = ""
+    relevance_score: int = 0
+    tier: AlertTier = "standard"
 
 
 @dataclass(slots=True)
@@ -29,3 +47,4 @@ class StateRecord:
     last_alerted: str | None
     alert_count: int
     last_text: str = ""
+    seen_job_ids: str = "[]"

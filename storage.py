@@ -34,6 +34,7 @@ class StateStore:
                     url          TEXT NOT NULL,
                     last_hash    TEXT NOT NULL,
                     last_text    TEXT NOT NULL DEFAULT '',
+                    seen_job_ids TEXT NOT NULL DEFAULT '[]',
                     last_checked TEXT NOT NULL,
                     last_alerted TEXT,
                     alert_count  INTEGER NOT NULL DEFAULT 0
@@ -72,12 +73,18 @@ class StateStore:
             )
             conn.commit()
             logger.info("Migrated company_state: added last_text column")
+        if "seen_job_ids" not in columns:
+            conn.execute(
+                "ALTER TABLE company_state ADD COLUMN seen_job_ids TEXT NOT NULL DEFAULT '[]'"
+            )
+            conn.commit()
+            logger.info("Migrated company_state: added seen_job_ids column")
 
     def get_state(self, company: str) -> StateRecord | None:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT company, url, last_hash, last_text, last_checked,
+                SELECT company, url, last_hash, last_text, seen_job_ids, last_checked,
                        last_alerted, alert_count
                 FROM company_state
                 WHERE company = ?
@@ -92,6 +99,7 @@ class StateStore:
             url=row["url"],
             last_hash=row["last_hash"],
             last_text=row["last_text"] or "",
+            seen_job_ids=row["seen_job_ids"] or "[]",
             last_checked=row["last_checked"],
             last_alerted=row["last_alerted"],
             alert_count=row["alert_count"],
@@ -102,13 +110,14 @@ class StateStore:
             conn.execute(
                 """
                 INSERT INTO company_state (
-                    company, url, last_hash, last_text, last_checked,
+                    company, url, last_hash, last_text, seen_job_ids, last_checked,
                     last_alerted, alert_count
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(company) DO UPDATE SET
                     url          = excluded.url,
                     last_hash    = excluded.last_hash,
                     last_text    = excluded.last_text,
+                    seen_job_ids = excluded.seen_job_ids,
                     last_checked = excluded.last_checked,
                     last_alerted = excluded.last_alerted,
                     alert_count = excluded.alert_count
@@ -118,6 +127,7 @@ class StateStore:
                     record.url,
                     record.last_hash,
                     record.last_text or "",
+                    record.seen_job_ids or "[]",
                     record.last_checked,
                     record.last_alerted,
                     record.alert_count,
@@ -151,7 +161,7 @@ class StateStore:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT company, url, last_hash, last_text, last_checked,
+                SELECT company, url, last_hash, last_text, seen_job_ids, last_checked,
                        last_alerted, alert_count
                 FROM company_state
                 ORDER BY company
@@ -164,6 +174,7 @@ class StateStore:
                 url=row["url"],
                 last_hash=row["last_hash"],
                 last_text=row["last_text"] or "",
+                seen_job_ids=row["seen_job_ids"] or "[]",
                 last_checked=row["last_checked"],
                 last_alerted=row["last_alerted"],
                 alert_count=row["alert_count"],

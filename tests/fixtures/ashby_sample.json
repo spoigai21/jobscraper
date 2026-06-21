@@ -1,0 +1,14 @@
+{
+  "jobs": [
+    {
+      "id": "a1b2c3d4-5678-90ab-cdef-1234567890ab",
+      "title": "Software Engineering Intern — Summer 2027",
+      "department": "Engineering",
+      "team": "Platform",
+      "employmentType": "Intern",
+      "location": "San Francisco, CA",
+      "jobUrl": "https://jobs.ashbyhq.com/example/a1b2c3d4",
+      "descriptionPlain": "Ship FastAPI microservices and RAG pipelines for our health platform. Experience with Redis and Docker required."
+    }
+  ]
+}

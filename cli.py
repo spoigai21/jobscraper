@@ -175,6 +175,10 @@ def test_alerts() -> None:
     payload = AlertPayload(
         company="Test Company",
         url="https://example.com/careers/test",
+        job_title="Software Engineering Intern",
+        job_url="https://example.com/careers/test/jobs/123",
+        relevance_score=9,
+        tier="high",
         trigger_keyword="intern",
         detected_at=datetime.now(timezone.utc).isoformat(),
         diff_snippet=(
@@ -183,8 +187,8 @@ def test_alerts() -> None:
         ),
     )
 
-    click.echo("Sending test alert to all channels...")
-    results = alert_manager.fire_all(payload)
+    click.echo("Sending high-tier test alert to all channels...")
+    results = alert_manager.fire(payload)
 
     for channel in CHANNELS:
         ok = results.get(channel, False)

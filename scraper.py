@@ -15,7 +15,17 @@ import requests
 from bs4 import BeautifulSoup
 
 from config import Settings
-from models import AlertPayload, CompanyConfig, StateRecord
+from job_parser import (
+    BoardType,
+    detect_board_type,
+    job_matches_keyword,
+    jobs_to_text,
+    parse_job_board,
+)
+from models import AlertPayload, CompanyConfig, JobPosting, StateRecord
+from nasa_scraper import is_nasa_company, nasa_jobs_to_text, parse_nasa_html
+from profile import UserProfile
+from scoring import classify_tier, score_job, should_exclude
 
 logger = logging.getLogger(__name__)
 
@@ -32,12 +42,21 @@ _MIN_SUBSTANTIAL_CHARS = 40
 # Minimum line length for a non-keyword diff segment to be job-relevant.
 _MIN_JOB_LINE_CHARS = 60
 
+# Workday cxs job-search page size (API returns HTTP 400 when limit > 20).
+_WORKDAY_REQUESTED_PAGE_LIMIT = 50
+_WORKDAY_PAGE_LIMIT = 20
+
 # Default job-related terms used when scanning diff segments.
 _DEFAULT_JOB_TERMS: tuple[str, ...] = (
     "intern",
     "internship",
     "co-op",
     "co op",
+    "co-op 2027",
+    "spring 2027",
+    "summer 2027",
+    "fall 2027",
+    "residency",
     "new grad",
     "early career",
 )
@@ -64,9 +83,14 @@ _BOILERPLATE_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
 class CareerPageScraper:
     """Fetches company careers pages and detects keyword-relevant content changes."""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        profile: UserProfile | None = None,
+    ) -> None:
         """Initialize the scraper with runtime settings (timeouts, user agent, etc.)."""
         self._settings = settings
+        self._profile = profile
 
     def _request_headers(self, url: str, *, json_response: bool = False) -> dict[str, str]:
         """Build browser-like headers; job-board APIs request JSON."""
@@ -96,6 +120,28 @@ class CareerPageScraper:
         return headers
 
     @staticmethod
+    def _is_per_job_board_url(url: str) -> bool:
+        return detect_board_type(url) in (
+            BoardType.GREENHOUSE,
+            BoardType.ASHBY,
+            BoardType.LEVER,
+        )
+
+    @staticmethod
+    def _load_seen_job_ids(state: StateRecord) -> set[str]:
+        try:
+            loaded = json.loads(state.seen_job_ids or "[]")
+        except json.JSONDecodeError:
+            return set()
+        if not isinstance(loaded, list):
+            return set()
+        return {str(job_id) for job_id in loaded}
+
+    @staticmethod
+    def _save_seen_job_ids(state: StateRecord, job_ids: set[str]) -> None:
+        state.seen_job_ids = json.dumps(sorted(job_ids))
+
+    @staticmethod
     def _is_json_job_board_url(url: str) -> bool:
         lowered = url.lower()
         return any(
@@ -105,8 +151,13 @@ class CareerPageScraper:
                 "api.ashbyhq.com/posting-api",
                 "api.lever.co/v0/postings",
                 "/wday/cxs/",
+                "uber.com/api/loadsearchjobsresults",
             )
         )
+
+    @staticmethod
+    def _is_uber_jobs_api_url(url: str) -> bool:
+        return "uber.com/api/loadsearchjobsresults" in url.lower()
 
     @staticmethod
     def _workday_search_text(url: str) -> str:
@@ -114,8 +165,105 @@ class CareerPageScraper:
         values = query.get("searchText") or query.get("q") or [""]
         return values[0]
 
+    @staticmethod
+    def _uber_search_query(url: str) -> str:
+        query = parse_qs(urlparse(url).query)
+        values = query.get("query") or query.get("q") or ["intern"]
+        return values[0]
+
+    @staticmethod
+    def _uber_locale_code(url: str) -> str:
+        query = parse_qs(urlparse(url).query)
+        values = query.get("localeCode") or ["en"]
+        return values[0]
+
+    def _fetch_uber(self, url: str, headers: dict[str, str]) -> str:
+        """POST to Uber's public careers search API (requires X-Csrf-Token)."""
+        parsed = urlparse(url)
+        request_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+        locale_code = self._uber_locale_code(url)
+        payload = {
+            "params": {"query": self._uber_search_query(url)},
+            "page": 0,
+            "limit": 100,
+        }
+        uber_headers = {
+            **headers,
+            "X-Csrf-Token": "x",
+            "Content-Type": "application/json",
+        }
+        response = requests.post(
+            request_url,
+            params={"localeCode": locale_code},
+            headers=uber_headers,
+            json=payload,
+            timeout=self._settings.request_timeout,
+        )
+        response.raise_for_status()
+        return response.text
+
+    def _fetch_workday(self, url: str, headers: dict[str, str], request_url: str) -> str:
+        """Paginate a Workday cxs job search and return aggregated JSON."""
+        search_text = self._workday_search_text(url)
+        page_limit = _WORKDAY_REQUESTED_PAGE_LIMIT
+        all_postings: list[dict] = []
+        total: int | None = None
+        offset = 0
+
+        while True:
+            payload = {
+                "appliedFacets": {},
+                "limit": page_limit,
+                "offset": offset,
+                "searchText": search_text,
+            }
+            response = requests.post(
+                request_url,
+                headers=headers,
+                json=payload,
+                timeout=self._settings.request_timeout,
+            )
+            if response.status_code == 400 and page_limit > _WORKDAY_PAGE_LIMIT:
+                page_limit = _WORKDAY_PAGE_LIMIT
+                continue
+
+            response.raise_for_status()
+            data = response.json()
+
+            if data.get("errorCode") and page_limit > _WORKDAY_PAGE_LIMIT:
+                page_limit = _WORKDAY_PAGE_LIMIT
+                continue
+
+            postings = data.get("jobPostings") or []
+            if total is None and isinstance(data.get("total"), int):
+                total = data["total"]
+
+            if not postings:
+                break
+
+            all_postings.extend(postings)
+
+            if len(postings) < page_limit:
+                break
+            if total is not None and len(all_postings) >= total:
+                break
+
+            offset += page_limit
+
+        return json.dumps(
+            {
+                "jobPostings": all_postings,
+                "total": total if total is not None else len(all_postings),
+            }
+        )
+
     def _extract_text_from_json(self, raw: str, url: str) -> str:
         """Flatten public job-board JSON into searchable plain text."""
+        board_type = detect_board_type(url)
+        if board_type in (BoardType.GREENHOUSE, BoardType.ASHBY, BoardType.LEVER):
+            jobs = parse_job_board(raw, url, "")
+            return jobs_to_text(jobs)
+
         data = json.loads(raw)
         parts: list[str] = []
         lowered_url = url.lower()
@@ -142,6 +290,18 @@ class CareerPageScraper:
             for job in data.get("jobPostings", []):
                 parts.append(str(job.get("title", "")))
                 parts.append(str(job.get("locationsText", "")))
+        elif "uber.com/api/loadsearchjobsresults" in lowered_url:
+            results = data.get("data", {}).get("results", [])
+            if not isinstance(results, list):
+                results = []
+            for job in results:
+                if not isinstance(job, dict):
+                    continue
+                parts.append(str(job.get("title", "")))
+                parts.append(str(job.get("description", "")))
+                for dept in job.get("departments") or []:
+                    if isinstance(dept, dict):
+                        parts.append(str(dept.get("name", "")))
 
         return " ".join(part for part in parts if part).lower()
 
@@ -165,18 +325,9 @@ class CareerPageScraper:
         for attempt in range(1, _MAX_FETCH_ATTEMPTS + 1):
             try:
                 if "/wday/cxs/" in url:
-                    payload = {
-                        "appliedFacets": {},
-                        "limit": 20,
-                        "offset": 0,
-                        "searchText": self._workday_search_text(url),
-                    }
-                    response = requests.post(
-                        request_url,
-                        headers=headers,
-                        json=payload,
-                        timeout=self._settings.request_timeout,
-                    )
+                    return self._fetch_workday(url, headers, request_url)
+                if self._is_uber_jobs_api_url(url):
+                    return self._fetch_uber(url, headers)
                 else:
                     response = requests.get(
                         request_url,
@@ -261,7 +412,7 @@ class CareerPageScraper:
         lowered_text = text.lower()
         for keyword in keywords:
             lowered_keyword = keyword.lower()
-            if lowered_keyword in {"intern", "2026", "2027"}:
+            if lowered_keyword in {"intern", "2027"}:
                 if re.search(rf"\b{re.escape(lowered_keyword)}\b", lowered_text):
                     return keyword
             elif lowered_keyword in lowered_text:
@@ -379,34 +530,233 @@ class CareerPageScraper:
 
         return "Page content changed"
 
+    def _build_job_alert(
+        self,
+        job: JobPosting,
+        company: CompanyConfig,
+        now_iso: str,
+    ) -> AlertPayload | None:
+        """Score a single new job and build an alert payload when it qualifies."""
+        trigger_keyword = job_matches_keyword(job, company.keywords)
+        if trigger_keyword is None:
+            return None
+
+        if self._profile is not None and should_exclude(job, self._profile):
+            logger.debug(
+                "Excluding %s at %s (%r)",
+                job.title,
+                company.name,
+                job.id,
+            )
+            return None
+
+        score = score_job(job, self._profile) if self._profile is not None else 0
+        tier = (
+            classify_tier(score, self._profile)
+            if self._profile is not None
+            else "standard"
+        )
+        job_url = job.url or company.url
+        meta = ", ".join(part for part in (job.department, job.location) if part)
+        diff_snippet = f"New: {job.title}"
+        if meta:
+            diff_snippet = f"{diff_snippet} ({meta})"
+
+        return AlertPayload(
+            company=company.name,
+            url=job_url,
+            job_title=job.title,
+            job_url=job_url,
+            relevance_score=score,
+            tier=tier,
+            trigger_keyword=trigger_keyword,
+            detected_at=now_iso,
+            diff_snippet=diff_snippet[:300],
+        )
+
+    def _poll_per_job_board(
+        self,
+        company: CompanyConfig,
+        state: StateRecord,
+        raw: str,
+        now: datetime,
+        now_iso: str,
+    ) -> list[AlertPayload]:
+        """Detect new listings on Greenhouse, Ashby, or Lever JSON boards."""
+        jobs = parse_job_board(raw, company.url, company.name)
+        current_ids = {job.id for job in jobs}
+        seen_ids = self._load_seen_job_ids(state)
+
+        text = jobs_to_text(jobs)
+        state.last_hash = self.hash_content(text)
+        state.last_text = text
+        state.last_checked = now_iso
+
+        if not seen_ids:
+            self._save_seen_job_ids(state, current_ids)
+            logger.debug(
+                "Seeding job IDs for %s (%d listings)",
+                company.name,
+                len(current_ids),
+            )
+            return []
+
+        new_jobs = [job for job in jobs if job.id not in seen_ids]
+        self._save_seen_job_ids(state, current_ids)
+
+        if not new_jobs:
+            return []
+
+        alerts = [
+            payload
+            for job in new_jobs
+            if (payload := self._build_job_alert(job, company, now_iso)) is not None
+        ]
+        if not alerts:
+            logger.debug(
+                "Ignoring %d new listings for %s (filtered out)",
+                len(new_jobs),
+                company.name,
+            )
+            return []
+
+        if state.last_alerted is not None:
+            last_alerted = datetime.fromisoformat(state.last_alerted)
+            elapsed = (now - last_alerted).total_seconds()
+            if elapsed <= self._settings.min_alert_interval:
+                logger.info(
+                    "Suppressing alert for %s: %.0fs since last alert "
+                    "(min interval %ds)",
+                    company.name,
+                    elapsed,
+                    self._settings.min_alert_interval,
+                )
+                return []
+
+        state.last_alerted = now_iso
+        state.alert_count += len(alerts)
+
+        for payload in alerts:
+            logger.info(
+                "Alert triggered for %s (%r, score=%d, tier=%s)",
+                company.name,
+                payload.job_title or payload.trigger_keyword,
+                payload.relevance_score,
+                payload.tier,
+            )
+
+        return alerts
+
+    def _poll_nasa(
+        self,
+        company: CompanyConfig,
+        state: StateRecord,
+        now: datetime,
+        now_iso: str,
+    ) -> list[AlertPayload]:
+        """Detect new SWE-related listings on NASA STEM Gateway."""
+        html = self.fetch(company.url)
+        if html is None:
+            state.last_checked = now_iso
+            return []
+
+        jobs = parse_nasa_html(html, company.name, base_url=company.url)
+        current_ids = {job.id for job in jobs}
+        seen_ids = self._load_seen_job_ids(state)
+
+        text = nasa_jobs_to_text(jobs)
+        state.last_hash = self.hash_content(text)
+        state.last_text = text
+        state.last_checked = now_iso
+
+        if not seen_ids:
+            self._save_seen_job_ids(state, current_ids)
+            logger.debug(
+                "Seeding NASA job IDs for %s (%d listings)",
+                company.name,
+                len(current_ids),
+            )
+            return []
+
+        new_jobs = [job for job in jobs if job.id not in seen_ids]
+        self._save_seen_job_ids(state, current_ids)
+
+        if not new_jobs:
+            return []
+
+        alerts = [
+            payload
+            for job in new_jobs
+            if (payload := self._build_job_alert(job, company, now_iso)) is not None
+        ]
+        if not alerts:
+            logger.debug(
+                "Ignoring %d new NASA listings for %s (filtered out)",
+                len(new_jobs),
+                company.name,
+            )
+            return []
+
+        if state.last_alerted is not None:
+            last_alerted = datetime.fromisoformat(state.last_alerted)
+            elapsed = (now - last_alerted).total_seconds()
+            if elapsed <= self._settings.min_alert_interval:
+                logger.info(
+                    "Suppressing alert for %s: %.0fs since last alert "
+                    "(min interval %ds)",
+                    company.name,
+                    elapsed,
+                    self._settings.min_alert_interval,
+                )
+                return []
+
+        state.last_alerted = now_iso
+        state.alert_count += len(alerts)
+
+        for payload in alerts:
+            logger.info(
+                "Alert triggered for %s (%r, score=%d, tier=%s)",
+                company.name,
+                payload.job_title or payload.trigger_keyword,
+                payload.relevance_score,
+                payload.tier,
+            )
+
+        return alerts
+
     def poll_company(
         self,
         company: CompanyConfig,
         state: StateRecord,
-    ) -> AlertPayload | None:
-        """Poll a single company careers page and optionally emit an alert.
+    ) -> list[AlertPayload]:
+        """Poll a single company careers page and optionally emit alerts.
 
-        Pipeline: fetch → extract text → hash → keyword check. Updates
-        ``state.last_hash``, ``state.last_text``, and ``state.last_checked`` on
-        every successful parse. Emits an :class:`AlertPayload` only when the
-        content hash changed, the diff is substantial, and either a keyword
-        matched or a job-related snippet appeared in the diff.
+        JSON boards (Greenhouse/Ashby/Lever): fetch → parse jobs → diff IDs →
+        score/filter each new job → emit per-job alerts.
+
+        HTML fallback: fetch → hash diff → keyword check (legacy path).
 
         Args:
             company: Company configuration (name, URL, keywords).
             state: Mutable persisted state for this company.
 
         Returns:
-            An alert payload when all alert conditions are met, else ``None``.
+            Zero or more alert payloads for newly detected qualifying jobs.
         """
         now = datetime.now(timezone.utc)
         now_iso = now.isoformat()
 
         try:
+            if is_nasa_company(company.name):
+                return self._poll_nasa(company, state, now, now_iso)
+
             html = self.fetch(company.url)
             if html is None:
                 state.last_checked = now_iso
-                return None
+                return []
+
+            if self._is_per_job_board_url(company.url):
+                return self._poll_per_job_board(company, state, html, now, now_iso)
 
             text = self.extract_text(html, company.url)
             content_hash = self.hash_content(text)
@@ -420,7 +770,7 @@ class CareerPageScraper:
             state.last_checked = now_iso
 
             if not hash_changed:
-                return None
+                return []
 
             # First successful poll seeds baseline text without alerting.
             if not previous_hash:
@@ -429,19 +779,21 @@ class CareerPageScraper:
                     company.name,
                     content_hash[:8],
                 )
-                return None
+                return []
 
             job_snippet = self._find_job_snippet(previous_text, text, company.keywords)
-            if not self._is_substantial_change(previous_text, text, job_snippet):
+            matched_keyword = self.check_keywords(text, company.keywords)
+            if matched_keyword is None and not self._is_substantial_change(
+                previous_text, text, job_snippet
+            ):
                 logger.debug(
                     "Ignoring trivial change for %s (no substantial diff)",
                     company.name,
                 )
-                return None
+                return []
 
-            matched_keyword = self.check_keywords(text, company.keywords)
             if matched_keyword is None and job_snippet is None:
-                return None
+                return []
 
             if state.last_alerted is not None:
                 last_alerted = datetime.fromisoformat(state.last_alerted)
@@ -454,7 +806,7 @@ class CareerPageScraper:
                         elapsed,
                         self._settings.min_alert_interval,
                     )
-                    return None
+                    return []
 
             diff_snippet = self.get_diff_snippet(
                 previous_text,
@@ -473,14 +825,16 @@ class CareerPageScraper:
                 state.alert_count,
             )
 
-            return AlertPayload(
-                company=company.name,
-                url=company.url,
-                trigger_keyword=trigger_keyword,
-                detected_at=now_iso,
-                diff_snippet=diff_snippet,
-            )
+            return [
+                AlertPayload(
+                    company=company.name,
+                    url=company.url,
+                    trigger_keyword=trigger_keyword,
+                    detected_at=now_iso,
+                    diff_snippet=diff_snippet,
+                )
+            ]
         except Exception:
             logger.exception("Unexpected error polling %s", company.name)
             state.last_checked = now_iso
-            return None
+            return []
