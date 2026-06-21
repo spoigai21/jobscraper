@@ -1,5 +1,3 @@
-"""Application configuration, environment loading, and logging setup."""
-
 from __future__ import annotations
 
 import logging
@@ -21,8 +19,6 @@ LOG_FILE = Path(__file__).resolve().parent / "monitor.log"
 
 @dataclass(frozen=True, slots=True)
 class Settings:
-    """Runtime settings loaded from environment variables."""
-
     twilio_account_sid: str
     twilio_auth_token: str
     twilio_from_number: str
@@ -41,7 +37,6 @@ class Settings:
 
 
 def _env_int(name: str, default: int) -> int:
-    """Read an integer environment variable, falling back to ``default``."""
     raw = os.getenv(name)
     if raw is None or raw.strip() == "":
         return default
@@ -49,9 +44,7 @@ def _env_int(name: str, default: int) -> int:
 
 
 def get_settings() -> Settings:
-    """Load application settings from the environment and ``.env`` file."""
     load_dotenv()
-
     return Settings(
         twilio_account_sid=os.getenv("TWILIO_ACCOUNT_SID", ""),
         twilio_auth_token=os.getenv("TWILIO_AUTH_TOKEN", ""),
@@ -72,7 +65,6 @@ def get_settings() -> Settings:
 
 
 def setup_logging() -> None:
-    """Configure root logging to console and ``monitor.log``."""
     root = logging.getLogger()
     if root.handlers:
         return

@@ -1,5 +1,3 @@
-"""Scheduler and daemon entrypoint for the internship monitor."""
-
 from __future__ import annotations
 
 import logging
@@ -8,7 +6,6 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 import schedule
-from rich.console import Console
 
 from alerts import AlertManager
 from companies import COMPANIES
@@ -18,25 +15,18 @@ from scraper import CareerPageScraper
 from storage import StateStore
 
 logger = logging.getLogger(__name__)
-
 PACIFIC = ZoneInfo("America/Los_Angeles")
-console = Console()
 
 
 def get_poll_interval(settings: Settings | None = None) -> int:
-    """Return poll interval in seconds based on current US/Pacific business hours."""
     settings = settings or get_settings()
-    now_pacific = datetime.now(PACIFIC)
-    hour = now_pacific.hour
-
+    hour = datetime.now(PACIFIC).hour
     if settings.business_hours_start <= hour < settings.business_hours_end:
         return settings.poll_interval_business
-
     return settings.poll_interval_overnight
 
 
 def _default_state(company: CompanyConfig) -> StateRecord:
-    """Create initial persisted state for a company that has never been polled."""
     now_iso = datetime.now(timezone.utc).isoformat()
     return StateRecord(
         company=company.name,
@@ -54,8 +44,7 @@ def run_poll_cycle(
     alert_manager: AlertManager,
     companies: list[CompanyConfig],
 ) -> None:
-    """Poll all enabled companies once and dispatch alerts for detected changes."""
-    enabled = [company for company in companies if company.enabled]
+    enabled = [c for c in companies if c.enabled]
     alerts_fired = 0
 
     for company in enabled:
@@ -67,21 +56,16 @@ def run_poll_cycle(
                 results = alert_manager.fire_all(payload)
                 store.log_alert(payload, results)
                 alerts_fired += 1
-                console.print(
-                    f"[yellow]⚠[/yellow] {company.name}: "
-                    f"ALERT ({payload.trigger_keyword})"
-                )
+                print(f"ALERT {company.name} ({payload.trigger_keyword})")
             else:
-                console.print(f"[green]✓[/green] {company.name}: OK")
+                print(f"OK   {company.name}")
 
             store.upsert_state(state)
         except Exception:
             logger.exception("Poll cycle failed for %s", company.name)
-            console.print(f"[red]⚠[/red] {company.name}: ERROR")
+            print(f"ERR  {company.name}")
 
-    console.print(
-        f"Checked {len(enabled)} companies. {alerts_fired} alerts fired."
-    )
+    print(f"Checked {len(enabled)} companies, {alerts_fired} alerts fired.")
 
 
 def _poll_and_reschedule(
@@ -90,22 +74,16 @@ def _poll_and_reschedule(
     alert_manager: AlertManager,
     settings: Settings,
 ) -> None:
-    """Run one poll cycle and reschedule the next run with a fresh interval."""
     run_poll_cycle(scraper, store, alert_manager, COMPANIES)
     schedule.clear()
     interval = get_poll_interval(settings)
     schedule.every(interval).seconds.do(
-        _poll_and_reschedule,
-        scraper,
-        store,
-        alert_manager,
-        settings,
+        _poll_and_reschedule, scraper, store, alert_manager, settings
     )
-    logger.info("Next poll scheduled in %d seconds", interval)
+    logger.info("Next poll in %d seconds", interval)
 
 
 def main() -> None:
-    """Start the internship monitor daemon."""
     setup_logging()
     settings = get_settings()
     store = StateStore()
@@ -113,15 +91,13 @@ def main() -> None:
     alert_manager = AlertManager(settings)
 
     logger.info("Internship monitor starting")
-
     try:
         _poll_and_reschedule(scraper, store, alert_manager, settings)
-
         while True:
             schedule.run_pending()
             time.sleep(1)
     except KeyboardInterrupt:
-        console.print("Monitor stopped.")
+        print("Monitor stopped.")
 
 
 if __name__ == "__main__":
