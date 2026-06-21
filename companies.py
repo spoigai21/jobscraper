@@ -39,7 +39,7 @@ COMPANIES: list[CompanyConfig] = [
         name="Meta",
         url="https://www.metacareers.com/jobs?roles[0]=intern",
         keywords=DEFAULT_KEYWORDS,
-        enabled=True,
+        enabled=False,  # SPA loads listings via JS; no scrapeable job data in HTML
     ),
     CompanyConfig(
         name="Amazon",
@@ -55,19 +55,19 @@ COMPANIES: list[CompanyConfig] = [
     ),
     CompanyConfig(
         name="Uber",
-        url="https://www.uber.com/us/en/careers/list/?query=intern",
+        url="https://www.uber.com/us/en/careers/list/?query=internship",
         keywords=DEFAULT_KEYWORDS,
-        enabled=True,
+        enabled=False,  # SPA; static HTML has no job listings
     ),
     CompanyConfig(
         name="Waymo",
-        url="https://careers.withwaymo.com/jobs/search?employment_type=Intern",
+        url="https://boards-api.greenhouse.io/v1/boards/waymo/jobs?content=true",
         keywords=FILTERED_INTERN_KEYWORDS,
         enabled=True,
     ),
     CompanyConfig(
         name="Skydio",
-        url="https://jobs.ashbyhq.com/skydio?department=Intern",
+        url="https://api.ashbyhq.com/posting-api/job-board/skydio",
         keywords=FILTERED_INTERN_KEYWORDS,
         enabled=True,
     ),
@@ -97,7 +97,7 @@ COMPANIES: list[CompanyConfig] = [
     ),
     CompanyConfig(
         name="SpaceX",
-        url="https://www.spacex.com/internships",
+        url="https://boards-api.greenhouse.io/v1/boards/spacex/jobs?content=true",
         keywords=[
             "intern program",
             "internship/co-op",
@@ -110,19 +110,19 @@ COMPANIES: list[CompanyConfig] = [
     ),
     CompanyConfig(
         name="Rocket Lab",
-        url="https://job-boards.greenhouse.io/rocketlab?keyword=intern",
+        url="https://boards-api.greenhouse.io/v1/boards/rocketlab/jobs?content=true",
         keywords=FILTERED_INTERN_KEYWORDS,
         enabled=True,
     ),
     CompanyConfig(
         name="Blue Origin",
-        url="https://blueorigin.wd5.myworkdayjobs.com/BlueOrigin?q=intern",
+        url="https://blueorigin.wd5.myworkdayjobs.com/wday/cxs/blueorigin/BlueOrigin/jobs?searchText=intern",
         keywords=FILTERED_INTERN_KEYWORDS,
         enabled=True,
     ),
     CompanyConfig(
         name="Planet Labs",
-        url="https://www.planet.com/company/careers/?depId=internships",
+        url="https://boards-api.greenhouse.io/v1/boards/planetlabs/jobs?content=true",
         keywords=FILTERED_INTERN_KEYWORDS,
         enabled=True,
     ),
@@ -142,17 +142,17 @@ COMPANIES: list[CompanyConfig] = [
         name="Firefly",
         url="https://fireflyspace.com/careers/",
         keywords=STRICT_INTERN_KEYWORDS,
-        enabled=True,
+        enabled=False,  # WordPress careers page embeds listings via JS; section is empty in HTML
     ),
     CompanyConfig(
         name="Muon Space",
-        url="https://job-boards.greenhouse.io/muonspace?keyword=intern",
+        url="https://boards-api.greenhouse.io/v1/boards/muonspace/jobs?content=true",
         keywords=FILTERED_INTERN_KEYWORDS,
         enabled=True,
     ),
     CompanyConfig(
         name="Astranis",
-        url="https://job-boards.greenhouse.io/astranis?keyword=intern",
+        url="https://boards-api.greenhouse.io/v1/boards/astranis/jobs?content=true",
         keywords=FILTERED_INTERN_KEYWORDS,
         enabled=True,
     ),
@@ -160,7 +160,7 @@ COMPANIES: list[CompanyConfig] = [
         name="Air Space Intelligence",
         url="https://www.airspace-intelligence.com/careers",
         keywords=STRICT_INTERN_KEYWORDS,
-        enabled=True,
+        enabled=False,  # Marketing careers page has no scrapeable job listings or intern keywords
     ),
     CompanyConfig(
         name="Scale AI",

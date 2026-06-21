@@ -77,7 +77,7 @@ Start the monitor daemon:
 python main.py
 ```
 
-The monitor runs an immediate poll on startup, then re-polls every **30 minutes** during business hours (9 AM–6 PM Pacific) and every **2 hours** overnight. Press `Ctrl+C` to stop.
+The monitor runs an immediate poll on startup, then re-polls every **1 hour** during business hours (9 AM–6 PM Pacific) and every **4 hours** overnight. Press `Ctrl+C` to stop.
 
 **Useful CLI commands:**
 
@@ -183,7 +183,7 @@ Aggressive polling can get your IP blocked by career sites.
 
 **Fixes:**
 
-- Do not lower `POLL_INTERVAL_BUSINESS` below `1800` (30 minutes) without good reason.
+- Do not lower `POLL_INTERVAL_BUSINESS` below `3600` (1 hour) without good reason.
 - Increase `POLL_INTERVAL_OVERNIGHT` if you see HTTP 429 or timeout warnings in `monitor.log`.
 - If one company consistently fails, set `enabled=False` for that entry.
 

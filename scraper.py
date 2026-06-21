@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import difflib
 import hashlib
+import json
 import logging
 import re
 import time
 from datetime import datetime, timezone
+from urllib.parse import parse_qs, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -66,6 +68,83 @@ class CareerPageScraper:
         """Initialize the scraper with runtime settings (timeouts, user agent, etc.)."""
         self._settings = settings
 
+    def _request_headers(self, url: str, *, json_response: bool = False) -> dict[str, str]:
+        """Build browser-like headers; job-board APIs request JSON."""
+        headers = {
+            "User-Agent": self._settings.user_agent,
+            "Accept": (
+                "application/json, text/plain, */*"
+                if json_response
+                else (
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                    "image/avif,image/webp,*/*;q=0.8"
+                )
+            ),
+            "Accept-Language": "en-US,en;q=0.9",
+            "Sec-Ch-Ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+            "Sec-Ch-Ua-Mobile": "?0",
+            "Sec-Ch-Ua-Platform": '"macOS"',
+            "Sec-Fetch-Dest": "empty" if json_response else "document",
+            "Sec-Fetch-Mode": "cors" if json_response else "navigate",
+            "Sec-Fetch-Site": "none",
+            "Upgrade-Insecure-Requests": "1",
+        }
+        if json_response:
+            headers["Content-Type"] = "application/json"
+        if not json_response:
+            headers["Sec-Fetch-User"] = "?1"
+        return headers
+
+    @staticmethod
+    def _is_json_job_board_url(url: str) -> bool:
+        lowered = url.lower()
+        return any(
+            marker in lowered
+            for marker in (
+                "boards-api.greenhouse.io",
+                "api.ashbyhq.com/posting-api",
+                "api.lever.co/v0/postings",
+                "/wday/cxs/",
+            )
+        )
+
+    @staticmethod
+    def _workday_search_text(url: str) -> str:
+        query = parse_qs(urlparse(url).query)
+        values = query.get("searchText") or query.get("q") or [""]
+        return values[0]
+
+    def _extract_text_from_json(self, raw: str, url: str) -> str:
+        """Flatten public job-board JSON into searchable plain text."""
+        data = json.loads(raw)
+        parts: list[str] = []
+        lowered_url = url.lower()
+
+        if "api.ashbyhq.com/posting-api" in lowered_url:
+            for job in data.get("jobs", []):
+                parts.extend(
+                    str(job.get(field, ""))
+                    for field in ("title", "department", "team", "employmentType", "location")
+                )
+        elif "boards-api.greenhouse.io" in lowered_url:
+            for job in data.get("jobs", []):
+                parts.append(str(job.get("title", "")))
+                parts.append(str(job.get("content", "")))
+                for dept in job.get("departments") or []:
+                    if isinstance(dept, dict):
+                        parts.append(str(dept.get("name", "")))
+        elif "api.lever.co/v0/postings" in lowered_url:
+            for job in data if isinstance(data, list) else []:
+                parts.append(str(job.get("text", "")))
+                categories = job.get("categories") or {}
+                parts.extend(str(value) for value in categories.values())
+        elif "/wday/cxs/" in lowered_url:
+            for job in data.get("jobPostings", []):
+                parts.append(str(job.get("title", "")))
+                parts.append(str(job.get("locationsText", "")))
+
+        return " ".join(part for part in parts if part).lower()
+
     def fetch(self, url: str) -> str | None:
         """Fetch raw HTML from ``url``, retrying on connection errors.
 
@@ -79,15 +158,31 @@ class CareerPageScraper:
         Returns:
             Raw response body as a string, or ``None`` if all attempts fail.
         """
-        headers = {"User-Agent": self._settings.user_agent}
+        json_board = self._is_json_job_board_url(url)
+        headers = self._request_headers(url, json_response=json_board)
+        request_url = url.split("?", 1)[0] if "/wday/cxs/" in url else url
 
         for attempt in range(1, _MAX_FETCH_ATTEMPTS + 1):
             try:
-                response = requests.get(
-                    url,
-                    headers=headers,
-                    timeout=self._settings.request_timeout,
-                )
+                if "/wday/cxs/" in url:
+                    payload = {
+                        "appliedFacets": {},
+                        "limit": 20,
+                        "offset": 0,
+                        "searchText": self._workday_search_text(url),
+                    }
+                    response = requests.post(
+                        request_url,
+                        headers=headers,
+                        json=payload,
+                        timeout=self._settings.request_timeout,
+                    )
+                else:
+                    response = requests.get(
+                        request_url,
+                        headers=headers,
+                        timeout=self._settings.request_timeout,
+                    )
                 response.raise_for_status()
                 return response.text
             except requests.exceptions.ConnectionError as exc:
@@ -112,18 +207,27 @@ class CareerPageScraper:
 
         return None
 
-    def extract_text(self, html: str) -> str:
-        """Extract normalized visible text from HTML.
+    def extract_text(self, html: str, url: str = "") -> str:
+        """Extract normalized visible text from HTML or job-board JSON.
 
         Parses with BeautifulSoup/lxml, removes script/style/nav/footer/header
-        elements, and returns lowercased stripped plain text.
+        elements, and returns lowercased stripped plain text. Public Greenhouse,
+        Ashby, Lever, and Workday JSON responses are flattened to plain text.
 
         Args:
-            html: Raw HTML document.
+            html: Raw HTML document or JSON payload.
+            url: Source URL used to pick JSON parsing rules.
 
         Returns:
             Normalized page text suitable for hashing and keyword search.
         """
+        stripped = html.strip()
+        if stripped.startswith("{") or stripped.startswith("["):
+            try:
+                return self._extract_text_from_json(stripped, url)
+            except json.JSONDecodeError:
+                pass
+
         soup = BeautifulSoup(html, "lxml")
 
         for tag_name in _STRIP_TAGS:
@@ -156,7 +260,11 @@ class CareerPageScraper:
         """
         lowered_text = text.lower()
         for keyword in keywords:
-            if keyword.lower() in lowered_text:
+            lowered_keyword = keyword.lower()
+            if lowered_keyword in {"intern", "2026", "2027"}:
+                if re.search(rf"\b{re.escape(lowered_keyword)}\b", lowered_text):
+                    return keyword
+            elif lowered_keyword in lowered_text:
                 return keyword
         return None
 
@@ -300,7 +408,7 @@ class CareerPageScraper:
                 state.last_checked = now_iso
                 return None
 
-            text = self.extract_text(html)
+            text = self.extract_text(html, company.url)
             content_hash = self.hash_content(text)
 
             previous_text = state.last_text or ""

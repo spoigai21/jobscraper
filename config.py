@@ -27,8 +27,8 @@ class Settings:
     gmail_address: str
     gmail_app_password: str
     alert_email_to: str
-    poll_interval_business: int = 1800
-    poll_interval_overnight: int = 7200
+    poll_interval_business: int = 3600
+    poll_interval_overnight: int = 14400
     business_hours_start: int = 9
     business_hours_end: int = 18
     request_timeout: int = 15
@@ -54,13 +54,13 @@ def get_settings() -> Settings:
         gmail_address=os.getenv("GMAIL_ADDRESS", ""),
         gmail_app_password=os.getenv("GMAIL_APP_PASSWORD", ""),
         alert_email_to=os.getenv("ALERT_EMAIL_TO", ""),
-        poll_interval_business=_env_int("POLL_INTERVAL_BUSINESS", 1800),
-        poll_interval_overnight=_env_int("POLL_INTERVAL_OVERNIGHT", 7200),
+        poll_interval_business=_env_int("POLL_INTERVAL_BUSINESS", 3600),
+        poll_interval_overnight=_env_int("POLL_INTERVAL_OVERNIGHT", 14400),
         business_hours_start=_env_int("BUSINESS_HOURS_START", 9),
         business_hours_end=_env_int("BUSINESS_HOURS_END", 18),
         request_timeout=_env_int("REQUEST_TIMEOUT", 15),
         min_alert_interval=_env_int("MIN_ALERT_INTERVAL", 3600),
-        user_agent=os.getenv("USER_AGENT", DEFAULT_USER_AGENT),
+        user_agent=os.getenv("USER_AGENT") or DEFAULT_USER_AGENT,
     )
 
 
