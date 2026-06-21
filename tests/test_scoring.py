@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from models import JobPosting
-from scoring import classify_tier, score_job, should_exclude
+from monitor.models import JobPosting
+from monitor.scoring import classify_tier, score_job, should_exclude
 
 
 def _job(
@@ -15,12 +15,13 @@ def _job(
     description: str = "",
     company_name: str = "ExampleCo",
     job_id: str = "test-1",
+    location: str = "Remote, US",
 ) -> JobPosting:
     return JobPosting(
         id=job_id,
         title=title,
         department=department,
-        location="Remote, US",
+        location=location,
         url=f"https://example.com/jobs/{job_id}",
         description=description,
         company_name=company_name,
@@ -129,14 +130,46 @@ class TestExclusions:
 
         assert should_exclude(job, profile)
 
-    def test_graduate_intern_excluded(self, profile) -> None:
+    def test_business_development_intern_excluded(self, profile) -> None:
         job = _job(
-            title="Graduate Intern",
-            department="Engineering",
-            description="Master's students welcome for advanced ML work.",
+            title="Business Development Intern, Berlin",
+            department="Business & Sales",
+            location="Berlin, Germany",
+            company_name="Uber",
+            description="Support the business development team in Europe.",
         )
 
         assert should_exclude(job, profile)
+
+    def test_non_us_location_excluded(self, profile) -> None:
+        job = _job(
+            title="Software Engineering Intern",
+            department="Engineering",
+            location="Paris, France",
+            description="Build backend services.",
+        )
+
+        assert should_exclude(job, profile)
+
+    def test_us_state_location_allowed(self, profile) -> None:
+        job = _job(
+            title="Software Engineering Intern",
+            department="Engineering",
+            location="San Francisco, CA",
+            description="Build backend services.",
+        )
+
+        assert not should_exclude(job, profile)
+
+    def test_workday_state_dash_city_location_allowed(self, profile) -> None:
+        job = _job(
+            title="Software Engineering Intern",
+            department="Engineering",
+            location="California - San Francisco",
+            description="Build backend services.",
+        )
+
+        assert not should_exclude(job, profile)
 
 
 class TestPrestigeAndTierClassification:

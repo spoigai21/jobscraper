@@ -7,9 +7,10 @@ from unittest.mock import patch
 
 import pytest
 
-from alerts import AlertManager
-from config import Settings
-from models import AlertPayload
+from monitor.alerts import AlertManager
+from monitor.config import Settings
+from monitor.models import AlertPayload
+from monitor.profile import load_profile
 
 
 def _test_settings(**overrides: object) -> Settings:
@@ -31,7 +32,7 @@ def _test_settings(**overrides: object) -> Settings:
 
 @pytest.fixture
 def manager() -> AlertManager:
-    return AlertManager(_test_settings())
+    return AlertManager(_test_settings(), load_profile())
 
 
 @pytest.fixture
@@ -50,7 +51,7 @@ def sample_payload() -> AlertPayload:
 
 
 class TestFireTierRouting:
-    def test_standard_tier_sends_push_only(
+    def test_standard_tier_sends_push_and_email(
         self, manager: AlertManager, sample_payload: AlertPayload
     ) -> None:
         payload = replace(sample_payload, tier="standard")
@@ -64,14 +65,14 @@ class TestFireTierRouting:
             results = manager.fire(payload)
 
         push.assert_called_once_with(payload)
+        email.assert_called_once_with(payload)
         sms.assert_not_called()
         call.assert_not_called()
-        email.assert_not_called()
         assert results == {
             "sms": False,
             "call": False,
             "push": True,
-            "email": False,
+            "email": True,
         }
 
     def test_high_tier_sends_all_channels(

@@ -7,6 +7,11 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+PACKAGE_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = PACKAGE_DIR.parent
+LOG_FILE = PROJECT_ROOT / "monitor.log"
+DEFAULT_DB_PATH = PROJECT_ROOT / "monitor.db"
+
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -14,7 +19,6 @@ DEFAULT_USER_AGENT = (
 )
 
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-LOG_FILE = Path(__file__).resolve().parent / "monitor.log"
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,7 +48,7 @@ def _env_int(name: str, default: int) -> int:
 
 
 def get_settings() -> Settings:
-    load_dotenv()
+    load_dotenv(PROJECT_ROOT / ".env")
     return Settings(
         twilio_account_sid=os.getenv("TWILIO_ACCOUNT_SID", ""),
         twilio_auth_token=os.getenv("TWILIO_AUTH_TOKEN", ""),

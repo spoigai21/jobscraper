@@ -6,7 +6,9 @@ import logging
 import sqlite3
 from datetime import datetime, timezone
 
-from models import AlertPayload, StateRecord
+from monitor.models import AlertPayload, StateRecord
+
+from monitor.config import DEFAULT_DB_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -15,8 +17,8 @@ _CHANNELS = ("sms", "call", "push", "email")
 
 
 class StateStore:
-    def __init__(self, db_path: str = "monitor.db") -> None:
-        self.db_path = db_path
+    def __init__(self, db_path: str | None = None) -> None:
+        self.db_path = str(db_path or DEFAULT_DB_PATH)
         self._init_db()
 
     def _connect(self) -> sqlite3.Connection:

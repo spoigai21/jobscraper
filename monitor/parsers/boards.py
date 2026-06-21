@@ -6,8 +6,9 @@ import json
 import re
 from enum import Enum
 from typing import Any
+from urllib.parse import urlparse
 
-from models import JobPosting
+from monitor.models import JobPosting
 
 __all__ = [
     "BoardType",
@@ -20,6 +21,8 @@ __all__ = [
     "parse_greenhouse",
     "parse_job_board",
     "parse_lever",
+    "parse_uber",
+    "parse_workday",
 ]
 
 
@@ -28,6 +31,7 @@ class BoardType(str, Enum):
     ASHBY = "ashby"
     LEVER = "lever"
     WORKDAY = "workday"
+    UBER = "uber"
     HTML = "html"
     UNKNOWN = "unknown"
 
@@ -72,6 +76,21 @@ def _greenhouse_location(job: dict[str, Any]) -> str:
     return ""
 
 
+def _uber_location(job: dict[str, Any]) -> str:
+    location = job.get("location")
+    if isinstance(location, dict):
+        city = str(location.get("city") or "").strip()
+        country = str(
+            location.get("countryName") or location.get("country") or ""
+        ).strip()
+        parts = [part for part in (city, country) if part]
+        if parts:
+            return ", ".join(parts)
+    if location:
+        return str(location)
+    return ""
+
+
 def detect_board_type(url: str) -> BoardType:
     lowered = url.lower()
     if "boards-api.greenhouse.io" in lowered:
@@ -82,6 +101,8 @@ def detect_board_type(url: str) -> BoardType:
         return BoardType.LEVER
     if "/wday/cxs/" in lowered:
         return BoardType.WORKDAY
+    if "uber.com/api/loadsearchjobsresults" in lowered:
+        return BoardType.UBER
     if url.startswith(("http://", "https://")):
         return BoardType.HTML
     return BoardType.UNKNOWN
@@ -145,6 +166,39 @@ def parse_ashby(raw_json: str | dict[str, Any], company_name: str) -> list[JobPo
     return postings
 
 
+def parse_uber(raw_json: str | dict[str, Any], company_name: str) -> list[JobPosting]:
+    data = _load_json(raw_json)
+    results: list[Any] = []
+    if isinstance(data, dict):
+        nested = data.get("data", {})
+        if isinstance(nested, dict):
+            results = nested.get("results") or []
+    if not isinstance(results, list):
+        results = []
+
+    postings: list[JobPosting] = []
+    for job in results:
+        if not isinstance(job, dict):
+            continue
+        job_id = job.get("id")
+        if job_id is None:
+            continue
+        department = str(job.get("team") or job.get("department") or "")
+        postings.append(
+            JobPosting(
+                id=str(job_id),
+                title=str(job.get("title") or ""),
+                department=department,
+                location=_uber_location(job),
+                url=f"https://www.uber.com/us/en/careers/list/{job_id}",
+                description=str(job.get("description") or ""),
+                company_name=company_name,
+            )
+        )
+
+    return postings
+
+
 def parse_lever(raw_json: str | list[Any], company_name: str) -> list[JobPosting]:
     data = _load_json(raw_json)
     jobs = data if isinstance(data, list) else []
@@ -186,6 +240,68 @@ def parse_lever(raw_json: str | list[Any], company_name: str) -> list[JobPosting
     return postings
 
 
+def _workday_public_base_url(board_url: str) -> str:
+    """Derive the public careers site base URL from a Workday cxs API URL."""
+    parsed = urlparse(board_url.split("?", 1)[0])
+    parts = [part for part in parsed.path.split("/") if part]
+    try:
+        cxs_idx = parts.index("cxs")
+        site = parts[cxs_idx + 2]
+    except (ValueError, IndexError):
+        return ""
+    return f"{parsed.scheme}://{parsed.netloc}/en-US/{site}"
+
+
+def _workday_job_id(job: dict[str, Any]) -> str | None:
+    bullet_fields = job.get("bulletFields")
+    if isinstance(bullet_fields, list) and bullet_fields:
+        return str(bullet_fields[0])
+    external_path = job.get("externalPath")
+    if external_path:
+        return str(external_path)
+    return None
+
+
+def _workday_job_url(job: dict[str, Any], board_url: str) -> str:
+    external_path = str(job.get("externalPath") or "")
+    if not external_path:
+        return ""
+    base = _workday_public_base_url(board_url)
+    if not base:
+        return external_path
+    return f"{base}{external_path}"
+
+
+def parse_workday(
+    raw_json: str | dict[str, Any],
+    company_name: str,
+    board_url: str = "",
+) -> list[JobPosting]:
+    data = _load_json(raw_json)
+    jobs = data.get("jobPostings", []) if isinstance(data, dict) else []
+    postings: list[JobPosting] = []
+
+    for job in jobs:
+        if not isinstance(job, dict):
+            continue
+        job_id = _workday_job_id(job)
+        if job_id is None:
+            continue
+        postings.append(
+            JobPosting(
+                id=job_id,
+                title=str(job.get("title") or ""),
+                department="",
+                location=str(job.get("locationsText") or ""),
+                url=_workday_job_url(job, board_url),
+                description="",
+                company_name=company_name,
+            )
+        )
+
+    return postings
+
+
 def parse_job_board(
     raw_json: str | dict[str, Any] | list[Any],
     url: str,
@@ -198,6 +314,10 @@ def parse_job_board(
         return parse_ashby(raw_json, company_name)
     if board_type == BoardType.LEVER:
         return parse_lever(raw_json, company_name)
+    if board_type == BoardType.UBER:
+        return parse_uber(raw_json, company_name)
+    if board_type == BoardType.WORKDAY:
+        return parse_workday(raw_json, company_name, board_url=url)
     return []
 
 

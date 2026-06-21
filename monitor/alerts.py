@@ -4,15 +4,16 @@ from __future__ import annotations
 
 import logging
 import smtplib
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from email.mime.text import MIMEText
 
 import requests
 from twilio.rest import Client
 
-from config import Settings
-from models import AlertPayload, AlertTier
-from profile import AlertChannel, UserProfile
+from monitor.config import Settings
+from monitor.models import AlertPayload, AlertTier
+from monitor.profile import AlertChannel, UserProfile
 
 logger = logging.getLogger(__name__)
 
@@ -20,16 +21,41 @@ NTFY_BASE_URL = "https://ntfy.sh"
 GMAIL_SMTP_HOST = "smtp.gmail.com"
 GMAIL_SMTP_PORT = 587
 
+_DEFAULT_STANDARD_CHANNELS: tuple[AlertChannel, ...] = ("push", "email")
+_DEFAULT_HIGH_CHANNELS: tuple[AlertChannel, ...] = ("push", "call", "sms", "email")
+
 
 class AlertManager:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        profile: UserProfile | None = None,
+    ) -> None:
         self._settings = settings
+        self._profile = profile
         self._twilio_client: Client | None = None
         if settings.twilio_account_sid and settings.twilio_auth_token:
             self._twilio_client = Client(
                 settings.twilio_account_sid,
                 settings.twilio_auth_token,
             )
+
+    def _channels_for_tier(self, tier: AlertTier) -> tuple[AlertChannel, ...]:
+        if self._profile is not None:
+            if tier == "high":
+                return self._profile.alerts.high.channels
+            return self._profile.alerts.standard.channels
+        if tier == "high":
+            return _DEFAULT_HIGH_CHANNELS
+        return _DEFAULT_STANDARD_CHANNELS
+
+    def _channel_handlers(self) -> dict[AlertChannel, Callable[[AlertPayload], bool]]:
+        return {
+            "push": self.send_push,
+            "call": self.send_voice_call,
+            "sms": self.send_sms,
+            "email": self.send_email,
+        }
 
     def _apply_url(self, payload: AlertPayload) -> str:
         return payload.job_url or payload.url
@@ -203,19 +229,22 @@ class AlertManager:
             return False
 
     def fire(self, payload: AlertPayload) -> dict[str, bool]:
-        """Route alerts by tier: standard is push-only, high uses all channels."""
-        channels = {"sms": False, "call": False, "push": False, "email": False}
-        if payload.tier == "high":
-            tasks = {
-                "push": self.send_push,
-                "call": self.send_voice_call,
-                "sms": self.send_sms,
-                "email": self.send_email,
-            }
-        else:
-            tasks = {"push": self.send_push}
+        """Route alerts using profile.yaml channel lists for each tier."""
+        channels: dict[str, bool] = {
+            "sms": False,
+            "call": False,
+            "push": False,
+            "email": False,
+        }
+        handlers = self._channel_handlers()
+        active = self._channels_for_tier(payload.tier)
+        tasks = {
+            name: handlers[name]
+            for name in active
+            if name in handlers
+        }
 
-        with ThreadPoolExecutor(max_workers=len(tasks)) as executor:
+        with ThreadPoolExecutor(max_workers=max(len(tasks), 1)) as executor:
             future_to_channel = {
                 executor.submit(handler, payload): name
                 for name, handler in tasks.items()
@@ -230,8 +259,9 @@ class AlertManager:
                     )
                     channels[name] = False
 
-        ok = [n for n, v in channels.items() if v]
-        bad = [n for n, v in channels.items() if not v]
+        attempted = set(tasks)
+        ok = [n for n in attempted if channels[n]]
+        bad = [n for n in attempted if not channels[n]]
         if ok:
             logger.info(
                 "Alert succeeded for %s (%s tier): %s",

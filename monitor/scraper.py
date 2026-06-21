@@ -14,18 +14,18 @@ from urllib.parse import parse_qs, urlparse
 import requests
 from bs4 import BeautifulSoup
 
-from config import Settings
-from job_parser import (
+from monitor.config import Settings
+from monitor.parsers.boards import (
     BoardType,
     detect_board_type,
     job_matches_keyword,
     jobs_to_text,
     parse_job_board,
 )
-from models import AlertPayload, CompanyConfig, JobPosting, StateRecord
-from nasa_scraper import is_nasa_company, nasa_jobs_to_text, parse_nasa_html
-from profile import UserProfile
-from scoring import classify_tier, score_job, should_exclude
+from monitor.parsers.nasa import is_nasa_company, nasa_jobs_to_text, parse_nasa_html
+from monitor.models import AlertPayload, CompanyConfig, JobPosting, StateRecord
+from monitor.profile import UserProfile
+from monitor.scoring import classify_tier, score_job, should_exclude
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +125,8 @@ class CareerPageScraper:
             BoardType.GREENHOUSE,
             BoardType.ASHBY,
             BoardType.LEVER,
+            BoardType.UBER,
+            BoardType.WORKDAY,
         )
 
     @staticmethod
@@ -291,17 +293,8 @@ class CareerPageScraper:
                 parts.append(str(job.get("title", "")))
                 parts.append(str(job.get("locationsText", "")))
         elif "uber.com/api/loadsearchjobsresults" in lowered_url:
-            results = data.get("data", {}).get("results", [])
-            if not isinstance(results, list):
-                results = []
-            for job in results:
-                if not isinstance(job, dict):
-                    continue
-                parts.append(str(job.get("title", "")))
-                parts.append(str(job.get("description", "")))
-                for dept in job.get("departments") or []:
-                    if isinstance(dept, dict):
-                        parts.append(str(dept.get("name", "")))
+            jobs = parse_job_board(raw, url, "")
+            return jobs_to_text(jobs)
 
         return " ".join(part for part in parts if part).lower()
 

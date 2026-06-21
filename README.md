@@ -1,6 +1,6 @@
 # Internship Monitor
 
-A Python daemon that polls 20+ company career pages for new internship postings and alerts you instantly when keywords like "intern" or "2027" appear. It diffs page content against stored hashes, then fires SMS, voice call, push notification, and email simultaneously so you can apply before listings fill up.
+A Python daemon that polls 20+ company career pages for new internship postings and alerts you when relevant roles appear. It tracks individual job listings, scores them against your profile, and sends push + email on every match — with SMS and voice calls for high-priority roles.
 
 ## Prerequisites
 
@@ -61,13 +61,15 @@ Gmail requires a 16-character app password for SMTP access (your normal password
 
 ### 6. Test alerts before running
 
-Verify all four notification channels work:
+Verify notification channels work:
 
 ```bash
 python cli.py test-alerts
 ```
 
-You should see a green checkmark for SMS, voice call, push, and email. Fix any red ✗ before proceeding.
+This sends a **high-tier** test through all channels (push, email, SMS, call). Standard alerts use push + email only.
+
+You should see a green checkmark for each configured channel. Fix any red ✗ before proceeding.
 
 ### 7. Run locally
 
@@ -87,6 +89,34 @@ The monitor runs an immediate poll on startup, then re-polls every **45 minutes*
 | `python cli.py alerts` | Recent alert history with channel status |
 | `python cli.py toggle "Google"` | Enable/disable a company |
 | `python cli.py run` | Same as `python main.py` |
+
+## Project layout
+
+```
+joblistingdetector/
+├── main.py              # Daemon entry point (used by Railway)
+├── cli.py               # CLI entry point
+├── monitor/             # Application package
+│   ├── app.py           # Polling loop and scheduler
+│   ├── alerts.py        # Push, email, SMS, voice delivery
+│   ├── companies.py     # Monitored company list
+│   ├── config.py        # Settings from .env
+│   ├── models.py        # Shared dataclasses
+│   ├── profile.py       # profile.yaml loader
+│   ├── profile.yaml     # Your skills, filters, alert tiers
+│   ├── scoring.py       # Job relevance scoring
+│   ├── scraper.py       # Careers page fetching and diffing
+│   ├── storage.py       # SQLite state + alert log
+│   ├── cli.py           # Click commands
+│   └── parsers/
+│       ├── boards.py    # Greenhouse, Ashby, Lever, Uber APIs
+│       └── nasa.py      # NASA STEM Gateway scraper
+├── tests/
+├── railway.toml         # Railway deploy config
+└── Procfile             # Process definition for Railway/Heroku
+```
+
+Runtime files (`monitor.db`, `monitor.log`) are written to the project root.
 
 ## Deploy to Railway
 
@@ -147,7 +177,7 @@ railway logs
 
 ## Customizing companies
 
-Edit `companies.py` to add, remove, or tune which career pages are monitored. Each entry is a `CompanyConfig`:
+Edit `monitor/companies.py` to add, remove, or tune which career pages are monitored. Each entry is a `CompanyConfig`:
 
 ```python
 CompanyConfig(
@@ -163,7 +193,18 @@ CompanyConfig(
 - **keywords** — All must be present logic is *not* used; an alert fires when *any* keyword matches after a page change. Tighten keywords (e.g. add `"summer"`, `"2027"`) to reduce noise.
 - **enabled** — Set to `False` to skip a company without deleting it, or run `python cli.py toggle "Stripe"`.
 
-After editing `companies.py`, restart the monitor (`python main.py` or redeploy on Railway).
+After editing `monitor/companies.py`, restart the monitor (`python main.py` or redeploy on Railway).
+
+## Alert tiers
+
+Channel routing is configured in `monitor/profile.yaml`:
+
+| Tier | Score | Channels |
+|------|-------|----------|
+| Standard | below 7 | push, email |
+| High | 7+ | push, email, SMS, call |
+
+Edit `monitor/profile.yaml` to change thresholds or channels.
 
 ## Troubleshooting
 
@@ -173,9 +214,11 @@ Career pages change frequently (cookie banners, nav updates, job count widgets).
 
 **Fixes:**
 
-- Add more specific keywords in `companies.py` (e.g. `"summer 2027"` instead of just `"intern"`).
+- Add more specific keywords in `monitor/companies.py` (e.g. `"summer 2027"` instead of just `"intern"`).
 - Increase `MIN_ALERT_INTERVAL` in `.env` (default `3600` = 1 hour) so the same company cannot re-alert too quickly.
 - Disable noisy companies with `python cli.py toggle "Company Name"`.
+
+Profile-based filters in `monitor/profile.yaml` (`roles_exclude`, `location`) also drop irrelevant postings on per-job boards (Greenhouse, Ashby, Lever, Uber).
 
 ### Rate limiting
 

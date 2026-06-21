@@ -7,9 +7,9 @@ from unittest.mock import patch
 
 import pytest
 
-from config import Settings
-from job_parser import JobPosting
-from nasa_scraper import (
+from monitor.config import Settings
+from monitor.models import JobPosting
+from monitor.parsers.nasa import (
     NasaScraper,
     discover_listing_pages,
     is_nasa_company,

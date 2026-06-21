@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import re
 
-from models import AlertTier, JobPosting
-from profile import UserProfile
+from monitor.models import AlertTier, JobPosting
+from monitor.profile import UserProfile
 
 _DREAM_ROLE_KEYWORDS: tuple[str, ...] = (
     "perception",
@@ -63,6 +63,118 @@ _ENGINEERING_DEPARTMENTS: tuple[str, ...] = (
     "machine learning",
 )
 
+_US_STATE_ABBREVS: frozenset[str] = frozenset(
+    {
+        "AL",
+        "AK",
+        "AZ",
+        "AR",
+        "CA",
+        "CO",
+        "CT",
+        "DE",
+        "FL",
+        "GA",
+        "HI",
+        "ID",
+        "IL",
+        "IN",
+        "IA",
+        "KS",
+        "KY",
+        "LA",
+        "ME",
+        "MD",
+        "MA",
+        "MI",
+        "MN",
+        "MS",
+        "MO",
+        "MT",
+        "NE",
+        "NV",
+        "NH",
+        "NJ",
+        "NM",
+        "NY",
+        "NC",
+        "ND",
+        "OH",
+        "OK",
+        "OR",
+        "PA",
+        "RI",
+        "SC",
+        "SD",
+        "TN",
+        "TX",
+        "UT",
+        "VT",
+        "VA",
+        "WA",
+        "WV",
+        "WI",
+        "WY",
+        "DC",
+    }
+)
+
+_US_STATE_NAMES: frozenset[str] = frozenset(
+    {
+        "alabama",
+        "alaska",
+        "arizona",
+        "arkansas",
+        "california",
+        "colorado",
+        "connecticut",
+        "delaware",
+        "district of columbia",
+        "florida",
+        "georgia",
+        "hawaii",
+        "idaho",
+        "illinois",
+        "indiana",
+        "iowa",
+        "kansas",
+        "kentucky",
+        "louisiana",
+        "maine",
+        "maryland",
+        "massachusetts",
+        "michigan",
+        "minnesota",
+        "mississippi",
+        "missouri",
+        "montana",
+        "nebraska",
+        "nevada",
+        "new hampshire",
+        "new jersey",
+        "new mexico",
+        "new york",
+        "north carolina",
+        "north dakota",
+        "ohio",
+        "oklahoma",
+        "oregon",
+        "pennsylvania",
+        "rhode island",
+        "south carolina",
+        "south dakota",
+        "tennessee",
+        "texas",
+        "utah",
+        "vermont",
+        "virginia",
+        "washington",
+        "west virginia",
+        "wisconsin",
+        "wyoming",
+    }
+)
+
 _SPACE_PERCEPTION_KEYWORDS: tuple[str, ...] = (
     "perception",
     "computer vision",
@@ -102,6 +214,35 @@ def _matches_any(text: str, keywords: tuple[str, ...]) -> bool:
     return any(_contains_term(text, keyword) for keyword in keywords)
 
 
+def _location_matches_profile(location: str, profile: UserProfile) -> bool:
+    """Return True when a posting location fits the profile's geography."""
+    normalized = location.strip()
+    if not normalized:
+        return True
+
+    lowered = normalized.lower()
+    if profile.location.remote_ok and "remote" in lowered:
+        return True
+
+    for country in profile.location.countries:
+        if _contains_term(lowered, country):
+            return True
+
+    if re.search(
+        r",\s*(" + "|".join(sorted(_US_STATE_ABBREVS)) + r")\b",
+        normalized,
+        flags=re.IGNORECASE,
+    ):
+        return True
+
+    if " - " in normalized:
+        state_part = normalized.split(" - ", 1)[0].strip().lower()
+        if state_part in _US_STATE_NAMES:
+            return True
+
+    return False
+
+
 def should_exclude(job: JobPosting, profile: UserProfile) -> bool:
     """Return True when a posting should be dropped before alerting."""
     text = _searchable_text(job)
@@ -113,6 +254,9 @@ def should_exclude(job: JobPosting, profile: UserProfile) -> bool:
     for term in profile.level_exclude:
         if _contains_term(text, term):
             return True
+
+    if not _location_matches_profile(job.location, profile):
+        return True
 
     return False
 

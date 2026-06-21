@@ -9,10 +9,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from config import Settings
-from models import AlertPayload, CompanyConfig, StateRecord
-from profile import load_profile
-from scraper import CareerPageScraper, _WORKDAY_PAGE_LIMIT, _WORKDAY_REQUESTED_PAGE_LIMIT
+from monitor.config import Settings
+from monitor.models import AlertPayload, CompanyConfig, StateRecord
+from monitor.profile import load_profile
+from monitor.scraper import CareerPageScraper, _WORKDAY_PAGE_LIMIT, _WORKDAY_REQUESTED_PAGE_LIMIT
 
 
 def _test_settings(**overrides: object) -> Settings:
@@ -341,6 +341,130 @@ class TestPollPerJobBoard:
         assert json.loads(state.seen_job_ids) == ["501"]
 
 
+WORKDAY_BOARD_JSON = json.dumps(
+    {
+        "total": 2,
+        "jobPostings": [
+            {
+                "title": "Software Engineering Intern Summer 2027",
+                "externalPath": "/job/California/Software-Engineering-Intern_JR501",
+                "locationsText": "California - San Francisco",
+                "bulletFields": ["JR501"],
+            },
+            {
+                "title": "Project Lead, Partnerships",
+                "externalPath": "/job/California/Project-Lead_JR999",
+                "locationsText": "California - San Francisco",
+                "bulletFields": ["JR999"],
+            },
+        ],
+    }
+)
+
+
+class TestPollWorkdayBoard:
+    @pytest.fixture
+    def workday_company(self) -> CompanyConfig:
+        return CompanyConfig(
+            name="Salesforce",
+            url=(
+                "https://salesforce.wd12.myworkdayjobs.com/wday/cxs/salesforce/"
+                "External_Career_Site/jobs?searchText=internship"
+            ),
+            keywords=["intern", "internship"],
+            enabled=True,
+        )
+
+    @pytest.fixture
+    def profiled_scraper(self) -> CareerPageScraper:
+        return CareerPageScraper(_test_settings(), load_profile())
+
+    def test_first_poll_seeds_workday_job_ids_without_alert(
+        self,
+        profiled_scraper: CareerPageScraper,
+        workday_company: CompanyConfig,
+    ) -> None:
+        state = StateRecord(
+            company="Salesforce",
+            url=workday_company.url,
+            last_hash="",
+            last_checked="",
+            last_alerted=None,
+            alert_count=0,
+        )
+
+        with patch.object(profiled_scraper, "fetch", return_value=WORKDAY_BOARD_JSON):
+            result = profiled_scraper.poll_company(workday_company, state)
+
+        assert result == []
+        assert set(json.loads(state.seen_job_ids)) == {"JR501", "JR999"}
+
+    def test_new_workday_intern_emits_scored_alert(
+        self,
+        profiled_scraper: CareerPageScraper,
+        workday_company: CompanyConfig,
+    ) -> None:
+        state = StateRecord(
+            company="Salesforce",
+            url=workday_company.url,
+            last_hash="seeded",
+            last_checked="",
+            last_alerted=(
+                datetime.now(timezone.utc) - timedelta(seconds=7200)
+            ).isoformat(),
+            alert_count=0,
+            seen_job_ids='["JR999"]',
+        )
+
+        with patch.object(profiled_scraper, "fetch", return_value=WORKDAY_BOARD_JSON):
+            result = profiled_scraper.poll_company(workday_company, state)
+
+        assert len(result) == 1
+        assert result[0].job_title == "Software Engineering Intern Summer 2027"
+
+    def test_non_intern_workday_job_rotation_does_not_alert(
+        self,
+        profiled_scraper: CareerPageScraper,
+        workday_company: CompanyConfig,
+    ) -> None:
+        rotated = json.dumps(
+            {
+                "total": 2,
+                "jobPostings": [
+                    {
+                        "title": "Software Engineering Intern Summer 2027",
+                        "externalPath": "/job/California/Software-Engineering-Intern_JR501",
+                        "locationsText": "California - San Francisco",
+                        "bulletFields": ["JR501"],
+                    },
+                    {
+                        "title": "Director, Enterprise Sales",
+                        "externalPath": "/job/California/Director-Enterprise-Sales_JR777",
+                        "locationsText": "California - San Francisco",
+                        "bulletFields": ["JR777"],
+                    },
+                ],
+            }
+        )
+        state = StateRecord(
+            company="Salesforce",
+            url=workday_company.url,
+            last_hash="seeded",
+            last_checked="",
+            last_alerted=(
+                datetime.now(timezone.utc) - timedelta(seconds=7200)
+            ).isoformat(),
+            alert_count=0,
+            seen_job_ids='["JR501", "JR999"]',
+        )
+
+        with patch.object(profiled_scraper, "fetch", return_value=rotated):
+            result = profiled_scraper.poll_company(workday_company, state)
+
+        assert result == []
+        assert set(json.loads(state.seen_job_ids)) == {"JR501", "JR777"}
+
+
 WORKDAY_URL = (
     "https://example.wd5.myworkdayjobs.com/wday/cxs/example/ExampleSite/jobs"
     "?searchText=software intern"
@@ -390,7 +514,7 @@ class TestWorkdayPagination:
             _mock_workday_response(total=0, postings=page_two),
         ]
 
-        with patch("scraper.requests.post", side_effect=responses) as mock_post:
+        with patch("monitor.scraper.requests.post", side_effect=responses) as mock_post:
             raw = scraper.fetch(WORKDAY_URL)
 
         assert mock_post.call_count == 3
@@ -416,7 +540,7 @@ class TestWorkdayPagination:
             _mock_workday_response(total=0, postings=[]),
         ]
 
-        with patch("scraper.requests.post", side_effect=responses) as mock_post:
+        with patch("monitor.scraper.requests.post", side_effect=responses) as mock_post:
             raw = scraper.fetch(WORKDAY_URL)
 
         assert mock_post.call_count == 3
@@ -435,7 +559,7 @@ class TestWorkdayPagination:
             _mock_workday_response(total=21, postings=page_one),
         ]
 
-        with patch("scraper.requests.post", side_effect=responses) as mock_post:
+        with patch("monitor.scraper.requests.post", side_effect=responses) as mock_post:
             raw = scraper.fetch(WORKDAY_URL)
 
         assert mock_post.call_count == 3
@@ -451,7 +575,7 @@ class TestWorkdayPagination:
             _mock_workday_response(total=1, postings=postings),
         ]
 
-        with patch("scraper.requests.post", side_effect=responses) as mock_post:
+        with patch("monitor.scraper.requests.post", side_effect=responses) as mock_post:
             raw = scraper.fetch(WORKDAY_URL)
 
         assert mock_post.call_count == 2

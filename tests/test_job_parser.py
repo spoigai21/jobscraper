@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from job_parser import (
+from monitor.models import JobPosting
+from monitor.parsers.boards import (
     BoardType,
-    JobPosting,
     detect_board_type,
     job_matches_keyword,
     jobs_to_text,
@@ -17,6 +17,8 @@ from job_parser import (
     parse_greenhouse,
     parse_job_board,
     parse_lever,
+    parse_uber,
+    parse_workday,
 )
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
@@ -41,6 +43,10 @@ class TestDetectBoardType:
             (
                 "https://blueorigin.wd5.myworkdayjobs.com/wday/cxs/blueorigin/BlueOrigin/jobs",
                 BoardType.WORKDAY,
+            ),
+            (
+                "https://www.uber.com/api/loadSearchJobsResults?localeCode=en&query=intern",
+                BoardType.UBER,
             ),
             ("https://careers.google.com/jobs", BoardType.HTML),
         ],
@@ -114,6 +120,57 @@ class TestParseLever:
         assert jobs[0].title == "Perception Software Intern"
 
 
+class TestParseUber:
+    def test_parses_live_api_shape(self) -> None:
+        raw = {
+            "data": {
+                "results": [
+                    {
+                        "id": 159600,
+                        "title": "Business Development Intern, Berlin",
+                        "team": "Business & Sales",
+                        "department": "University",
+                        "location": {
+                            "city": "Berlin",
+                            "countryName": "Germany",
+                            "country": "DEU",
+                        },
+                        "description": "Support business development in Europe.",
+                    }
+                ]
+            }
+        }
+        jobs = parse_uber(raw, "Uber")
+
+        assert len(jobs) == 1
+        job = jobs[0]
+        assert job.id == "159600"
+        assert job.title == "Business Development Intern, Berlin"
+        assert job.department == "Business & Sales"
+        assert job.location == "Berlin, Germany"
+        assert job.url.endswith("/159600")
+        assert job.company_name == "Uber"
+
+    def test_routes_to_uber_parser(self) -> None:
+        raw = {
+            "data": {
+                "results": [
+                    {
+                        "id": 42,
+                        "title": "Software Engineering Intern",
+                        "team": "Engineering",
+                        "location": {"city": "San Francisco", "countryName": "United States"},
+                        "description": "Build services.",
+                    }
+                ]
+            }
+        }
+        url = "https://www.uber.com/api/loadSearchJobsResults?localeCode=en&query=intern"
+        jobs = parse_job_board(raw, url, "Uber")
+        assert len(jobs) == 1
+        assert jobs[0].title == "Software Engineering Intern"
+
+
 class TestParseJobBoard:
     def test_routes_to_greenhouse_parser(self, greenhouse_json: dict) -> None:
         url = "https://boards-api.greenhouse.io/v1/boards/waymo/jobs"
@@ -129,6 +186,56 @@ class TestParseJobBoard:
         url = "https://api.lever.co/v0/postings/zoox"
         jobs = parse_job_board(lever_json, url, "Zoox")
         assert len(jobs) == 1
+
+    def test_routes_to_workday_parser(self) -> None:
+        raw = {
+            "jobPostings": [
+                {
+                    "title": "Data Science Intern",
+                    "externalPath": "/job/Remote/Data-Science-Intern_JR789",
+                    "locationsText": "Remote",
+                    "bulletFields": ["JR789"],
+                }
+            ]
+        }
+        url = "https://blueorigin.wd5.myworkdayjobs.com/wday/cxs/blueorigin/BlueOrigin/jobs"
+        jobs = parse_job_board(raw, url, "Blue Origin")
+        assert len(jobs) == 1
+        assert jobs[0].id == "JR789"
+
+
+class TestParseWorkday:
+    def test_parses_workday_postings(self) -> None:
+        raw = {
+            "total": 2,
+            "jobPostings": [
+                {
+                    "title": "Software Engineering Intern",
+                    "externalPath": "/job/California/Software-Engineering-Intern_JR123",
+                    "locationsText": "California - San Francisco",
+                    "bulletFields": ["JR123"],
+                },
+                {
+                    "title": "Project Lead",
+                    "externalPath": "/job/California/Project-Lead_JR456",
+                    "locationsText": "California - San Francisco",
+                    "bulletFields": ["JR456"],
+                },
+            ],
+        }
+        url = (
+            "https://salesforce.wd12.myworkdayjobs.com/wday/cxs/salesforce/"
+            "External_Career_Site/jobs?searchText=internship"
+        )
+        jobs = parse_workday(raw, "Salesforce", board_url=url)
+
+        assert len(jobs) == 2
+        intern_job = jobs[0]
+        assert intern_job.id == "JR123"
+        assert intern_job.title == "Software Engineering Intern"
+        assert intern_job.location == "California - San Francisco"
+        assert intern_job.url.endswith("/Software-Engineering-Intern_JR123")
+        assert intern_job.company_name == "Salesforce"
 
 
 class TestJobHelpers:

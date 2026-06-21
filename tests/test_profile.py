@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from profile import DEFAULT_PROFILE_PATH, load_profile
+from monitor.profile import DEFAULT_PROFILE_PATH, load_profile
 
 
 class TestLoadProfile:
@@ -67,12 +67,12 @@ class TestLoadProfile:
         assert profile.scoring.space_perception_bonus == 2
 
     def test_alert_tier_channels(self, profile) -> None:
-        assert profile.alerts.standard.channels == ("push",)
+        assert profile.alerts.standard.channels == ("push", "email")
         assert set(profile.alerts.high.channels) == {"push", "call", "sms", "email"}
         assert profile.alerts.high_score_threshold == 7
 
     def test_alert_channels_for_score(self, profile) -> None:
-        assert profile.alert_channels_for_score(3) == ("push",)
+        assert profile.alert_channels_for_score(3) == ("push", "email")
         assert profile.alert_channels_for_score(7) == profile.alerts.high.channels
         assert profile.alert_channels_for_score(12) == profile.alerts.high.channels
 

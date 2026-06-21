@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from models import CompanyConfig
+from monitor.models import CompanyConfig
 
 DEFAULT_KEYWORDS: list[str] = [
     "intern",
@@ -64,7 +64,7 @@ COMPANIES: list[CompanyConfig] = [
     CompanyConfig(
         name="Apple",
         url="https://jobs.apple.com/en-us/search?search=intern&sort=newest",
-        keywords=DEFAULT_KEYWORDS,
+        keywords=STRICT_INTERN_KEYWORDS,
         enabled=True,
     ),
     CompanyConfig(
@@ -266,7 +266,10 @@ COMPANIES: list[CompanyConfig] = [
     ),
     CompanyConfig(
         name="Salesforce",
-        url="https://salesforce.wd12.myworkdayjobs.com/wday/cxs/salesforce/External_Career_Site/jobs?searchText=intern",
+        url=(
+            "https://salesforce.wd12.myworkdayjobs.com/wday/cxs/salesforce/"
+            "External_Career_Site/jobs?searchText=internship"
+        ),
         keywords=FILTERED_INTERN_KEYWORDS,
         enabled=True,
     ),

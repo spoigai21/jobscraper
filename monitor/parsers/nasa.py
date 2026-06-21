@@ -11,8 +11,9 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup, Tag
 
-from config import Settings
-from job_parser import JobPosting, jobs_to_text
+from monitor.config import Settings
+from monitor.models import JobPosting
+from monitor.parsers.boards import jobs_to_text
 
 logger = logging.getLogger(__name__)
 

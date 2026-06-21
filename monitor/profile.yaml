@@ -208,6 +208,7 @@ alerts:
   standard:
     channels:
       - push
+      - email
   high:
     score_threshold: 7
     channels:

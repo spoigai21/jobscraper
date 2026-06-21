@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from profile import load_profile
+from monitor.profile import load_profile
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 
