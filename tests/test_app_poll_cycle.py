@@ -35,8 +35,6 @@ def _settings(**overrides: object):
         "twilio_from_number": "+15550001001",
         "twilio_to_number": "+15550001002",
         "ntfy_topic": "test-topic",
-        "gmail_address": "test@example.com",
-        "gmail_app_password": "test_password",
         "alert_email_to": "test@example.com",
         "min_alert_interval": 3600,
         "request_timeout": 5,

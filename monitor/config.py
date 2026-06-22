@@ -28,9 +28,8 @@ class Settings:
     twilio_from_number: str
     twilio_to_number: str
     ntfy_topic: str
-    gmail_address: str
-    gmail_app_password: str
     alert_email_to: str
+    ntfy_token: str = ""
     poll_interval_business: int = 2700
     poll_interval_overnight: int = 10800
     business_hours_start: int = 9
@@ -56,8 +55,7 @@ def get_settings() -> Settings:
         twilio_from_number=os.getenv("TWILIO_FROM_NUMBER", ""),
         twilio_to_number=os.getenv("TWILIO_TO_NUMBER", ""),
         ntfy_topic=os.getenv("NTFY_TOPIC", ""),
-        gmail_address=os.getenv("GMAIL_ADDRESS", ""),
-        gmail_app_password=os.getenv("GMAIL_APP_PASSWORD", ""),
+        ntfy_token=os.getenv("NTFY_TOKEN", ""),
         alert_email_to=os.getenv("ALERT_EMAIL_TO", ""),
         poll_interval_business=_env_int("POLL_INTERVAL_BUSINESS", 2700),
         poll_interval_overnight=_env_int("POLL_INTERVAL_OVERNIGHT", 10800),

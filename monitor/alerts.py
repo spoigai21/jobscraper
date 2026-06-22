@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import html
 import logging
-import smtplib
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
-from email.mime.text import MIMEText
 from zoneinfo import ZoneInfo
 
 import requests
@@ -24,8 +22,6 @@ logger = logging.getLogger(__name__)
 EASTERN = ZoneInfo("America/New_York")
 
 NTFY_BASE_URL = "https://ntfy.sh"
-GMAIL_SMTP_HOST = "smtp.gmail.com"
-GMAIL_SMTP_PORT = 587
 
 _DEFAULT_STANDARD_CHANNELS: tuple[AlertChannel, ...] = ("push", "email")
 _DEFAULT_HIGH_CHANNELS: tuple[AlertChannel, ...] = ("push", "call", "sms", "email")
@@ -235,21 +231,51 @@ class AlertManager:
         lines.extend(["", "Sent by your internship monitor"])
         return "\n".join(lines)
 
-    def send_push(self, payload: AlertPayload) -> bool:
+    def _uses_ntfy_email(self) -> bool:
+        return bool(
+            self._settings.ntfy_topic
+            and self._settings.alert_email_to
+            and self._settings.ntfy_token
+        )
+
+    def _can_combine_ntfy_push_and_email(
+        self, active: tuple[AlertChannel, ...]
+    ) -> bool:
+        return "push" in active and "email" in active and self._uses_ntfy_email()
+
+    def _post_ntfy(
+        self,
+        payload: AlertPayload,
+        *,
+        body: str,
+        include_email: bool,
+    ) -> bool:
         if not self._settings.ntfy_topic:
-            logger.error("Push skipped: NTFY_TOPIC is not configured")
+            logger.error("ntfy skipped: NTFY_TOPIC is not configured")
             return False
 
         apply_url = self._apply_url(payload)
-        url = f"{NTFY_BASE_URL}/{self._settings.ntfy_topic}"
         is_high = payload.tier == "high"
         headers = {
             "Title": self._push_title(payload),
             "Priority": "urgent" if is_high else "default",
             "Click": apply_url,
         }
-        body = self._push_body(payload)
 
+        if include_email:
+            if not self._settings.ntfy_token:
+                logger.error(
+                    "Email skipped: NTFY_TOKEN is required for ntfy email delivery "
+                    "(create one at https://ntfy.sh/account)"
+                )
+                return False
+            if not self._settings.alert_email_to:
+                logger.error("Email skipped: ALERT_EMAIL_TO is not configured")
+                return False
+            headers["Email"] = self._settings.alert_email_to
+            headers["Authorization"] = f"Bearer {self._settings.ntfy_token}"
+
+        url = f"{NTFY_BASE_URL}/{self._settings.ntfy_topic}"
         try:
             response = requests.post(
                 url,
@@ -257,51 +283,58 @@ class AlertManager:
                 data=body.encode("utf-8"),
                 timeout=self._settings.request_timeout,
             )
-            response.raise_for_status()
-            logger.info("Push sent for %s", payload.company)
+            if not response.ok:
+                logger.error(
+                    "ntfy request failed for %s (%s): %s",
+                    payload.company,
+                    response.status_code,
+                    response.text.strip(),
+                )
+                return False
             return True
         except Exception:
-            logger.exception("Failed to send push for %s", payload.company)
+            logger.exception("Failed ntfy request for %s", payload.company)
             return False
+
+    def send_push_and_email_ntfy(self, payload: AlertPayload) -> tuple[bool, bool]:
+        """One ntfy POST delivers both push and email (avoids duplicate notifications)."""
+        ok = self._post_ntfy(
+            payload,
+            body=self._email_body(payload),
+            include_email=True,
+        )
+        if ok:
+            logger.info("Push and email sent for %s via ntfy", payload.company)
+        return ok, ok
+
+    def send_push(self, payload: AlertPayload) -> bool:
+        if not self._settings.ntfy_topic:
+            logger.error("Push skipped: NTFY_TOPIC is not configured")
+            return False
+
+        ok = self._post_ntfy(
+            payload,
+            body=self._push_body(payload),
+            include_email=False,
+        )
+        if ok:
+            logger.info("Push sent for %s", payload.company)
+        return ok
+
+    def _send_email_ntfy(self, payload: AlertPayload, body: str) -> bool:
+        ok = self._post_ntfy(payload, body=body, include_email=True)
+        if ok:
+            logger.info("Email sent for %s via ntfy", payload.company)
+        return ok
 
     def send_email(self, payload: AlertPayload) -> bool:
-        if not all(
-            (
-                self._settings.gmail_address,
-                self._settings.gmail_app_password,
-                self._settings.alert_email_to,
-            )
-        ):
-            logger.error("Email skipped: Gmail SMTP credentials are not configured")
+        if not self._settings.alert_email_to:
+            logger.error("Email skipped: ALERT_EMAIL_TO is not configured")
             return False
-
-        subject = self._email_subject(payload)
-        body = self._email_body(payload)
-
-        message = MIMEText(body, "plain", "utf-8")
-        message["Subject"] = subject
-        message["From"] = self._settings.gmail_address
-        message["To"] = self._settings.alert_email_to
-
-        try:
-            with smtplib.SMTP(GMAIL_SMTP_HOST, GMAIL_SMTP_PORT, timeout=30) as smtp:
-                smtp.ehlo()
-                smtp.starttls()
-                smtp.ehlo()
-                smtp.login(
-                    self._settings.gmail_address,
-                    self._settings.gmail_app_password,
-                )
-                smtp.sendmail(
-                    self._settings.gmail_address,
-                    [self._settings.alert_email_to],
-                    message.as_string(),
-                )
-            logger.info("Email sent for %s", payload.company)
-            return True
-        except Exception:
-            logger.exception("Failed to send email for %s", payload.company)
+        if not self._settings.ntfy_topic:
+            logger.error("Email skipped: NTFY_TOPIC is not configured")
             return False
+        return self._send_email_ntfy(payload, self._email_body(payload))
 
     def fire(self, payload: AlertPayload) -> dict[str, bool]:
         """Route alerts using profile.yaml channel lists for each tier."""
@@ -313,10 +346,11 @@ class AlertManager:
         }
         handlers = self._channel_handlers()
         active = self._channels_for_tier(payload.tier)
+        combine_ntfy = self._can_combine_ntfy_push_and_email(active)
         tasks = {
             name: handlers[name]
             for name in active
-            if name in handlers
+            if name in handlers and not (combine_ntfy and name in ("push", "email"))
         }
 
         with ThreadPoolExecutor(max_workers=max(len(tasks), 1)) as executor:
@@ -334,7 +368,12 @@ class AlertManager:
                     )
                     channels[name] = False
 
-        attempted = set(tasks)
+        if combine_ntfy:
+            push_ok, email_ok = self.send_push_and_email_ntfy(payload)
+            channels["push"] = push_ok
+            channels["email"] = email_ok
+
+        attempted = set(active)
         ok = [n for n in attempted if channels[n]]
         bad = [n for n in attempted if not channels[n]]
         if ok:

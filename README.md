@@ -6,7 +6,6 @@ A Python daemon that polls 20+ company career pages for new internship postings 
 
 - **Python 3.11+**
 - **[Twilio](https://www.twilio.com/)** account (free trial works for testing)
-- **Gmail app password** (not your regular Gmail password)
 - **[Ntfy](https://ntfy.sh/)** app installed on your phone (iOS or Android)
 
 ## Setup
@@ -39,14 +38,16 @@ Open `.env` and fill in every value. See the sections below for where to get eac
 6. Set `TWILIO_TO_NUMBER` to your personal cell number (must be verified on trial accounts).
 7. Under **Verified Caller IDs**, add your personal number if using a trial account.
 
-### 4. Gmail app password
+### 4. Email alerts
 
-Gmail requires a 16-character app password for SMTP access (your normal password will not work).
+Email is delivered through **ntfy** (same service as push).
 
-1. Enable 2-Step Verification on your Google account: [Google Account Security](https://myaccount.google.com/security).
-2. Create an app password: [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords) (or see [Google's help article](https://support.google.com/accounts/answer/185833)).
-3. Choose **Mail** and your device, then copy the generated password.
-4. Set `GMAIL_ADDRESS` to your Gmail address, `GMAIL_APP_PASSWORD` to the app password, and `ALERT_EMAIL_TO` to the address that should receive alerts (can be the same Gmail).
+1. Set `ALERT_EMAIL_TO` to the inbox that should receive alerts.
+2. Create a free account at [ntfy.sh/account](https://ntfy.sh/account) and **verify that email address**.
+3. On the same Account page, create an **access token** and set `NTFY_TOKEN` in `.env` / Railway variables (starts with `tk_`).
+4. Keep `NTFY_TOPIC` set — email uses the same topic as push. Push works without a token; email requires one.
+
+Note: ntfy free tier limits email to **5 per day**. Push notifications are not subject to that cap.
 
 ### 5. Ntfy push notifications
 
@@ -154,8 +155,7 @@ railway variables set TWILIO_AUTH_TOKEN=your_token
 railway variables set TWILIO_FROM_NUMBER=+15551234567
 railway variables set TWILIO_TO_NUMBER=+15559876543
 railway variables set NTFY_TOPIC=your-secret-topic
-railway variables set GMAIL_ADDRESS=you@gmail.com
-railway variables set GMAIL_APP_PASSWORD=your_app_password
+railway variables set NTFY_TOKEN=tk_xxxxxxxx
 railway variables set ALERT_EMAIL_TO=you@gmail.com
 ```
 
@@ -273,7 +273,7 @@ Upgrade to a paid Twilio account when you are ready to deploy long-term.
 
 | Symptom | Likely cause |
 |---------|----------------|
-| No email alerts | Wrong app password, or 2FA not enabled on Gmail |
+| No email alerts | Missing `NTFY_TOKEN`, or `ALERT_EMAIL_TO` not verified at [ntfy.sh/account](https://ntfy.sh/account) |
 | No push notifications | Topic mismatch between `.env` and Ntfy app subscription |
 | `monitor.db` errors on Railway | Missing volume — set `MONITOR_DB_PATH` to a mounted volume path (see Deploy section) |
 | Import errors | Run `pip install -r requirements.txt` inside your virtualenv |
