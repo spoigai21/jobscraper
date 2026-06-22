@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import html
 import logging
 import smtplib
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 from email.mime.text import MIMEText
+from zoneinfo import ZoneInfo
 
 import requests
 from twilio.rest import Client
@@ -16,6 +19,8 @@ from monitor.models import AlertPayload, AlertTier
 from monitor.profile import AlertChannel, UserProfile
 
 logger = logging.getLogger(__name__)
+
+EASTERN = ZoneInfo("America/New_York")
 
 NTFY_BASE_URL = "https://ntfy.sh"
 GMAIL_SMTP_HOST = "smtp.gmail.com"
@@ -70,6 +75,26 @@ class AlertManager:
             return f"Score {payload.relevance_score}"
         return ""
 
+    @staticmethod
+    def _format_voice_datetime(iso_timestamp: str) -> str:
+        """Format an ISO timestamp for Twilio speech (e.g. June 20th, 9:34 PM EST)."""
+        try:
+            parsed = datetime.fromisoformat(iso_timestamp.replace("Z", "+00:00"))
+        except ValueError:
+            return iso_timestamp
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        eastern = parsed.astimezone(EASTERN)
+        day = eastern.day
+        if 11 <= day % 100 <= 13:
+            ordinal = f"{day}th"
+        else:
+            ordinal = f"{day}{({1: 'st', 2: 'nd', 3: 'rd'}.get(day % 10, 'th'))}"
+        hour = eastern.hour % 12 or 12
+        period = "AM" if eastern.hour < 12 else "PM"
+        tz = eastern.strftime("%Z")
+        return f"{eastern.strftime('%B')} {ordinal}, {hour}:{eastern.minute:02d} {period} {tz}"
+
     def send_sms(self, payload: AlertPayload) -> bool:
         if not self._twilio_client:
             logger.error("SMS skipped: Twilio credentials are not configured")
@@ -102,27 +127,30 @@ class AlertManager:
             logger.error("Voice call skipped: Twilio credentials are not configured")
             return False
 
-        title_part = (
-            f"{payload.job_title} at {payload.company}"
-            if payload.job_title
-            else f"{payload.company} internship"
+        role_part = payload.job_title if payload.job_title else "internship"
+        spoken_date = self._format_voice_datetime(payload.detected_at)
+        company = html.escape(payload.company)
+        role = html.escape(role_part)
+        spoken_date_xml = html.escape(spoken_date)
+        keyword = html.escape(payload.trigger_keyword)
+        opening = (
+            f"{company} {role} posted. "
+            f"Date: {spoken_date_xml}. "
+            f"Keyword: {keyword}."
         )
-        score_part = (
-            f" Relevance score {payload.relevance_score}."
-            if payload.relevance_score > 0
-            else ""
+        repeat = html.escape(
+            f"Repeating. {payload.company} {role_part} posted. Apply immediately."
         )
 
         twiml = (
             "<Response>"
             "<Say voice='Polly.Matthew'>"
-            f"High priority internship alert. {title_part}.{score_part} "
-            f"The keyword {payload.trigger_keyword} was detected. "
-            "Check your messages now."
+            f"{opening} "
+            "Godspeed and good fucking yard."
             "</Say>"
             "<Pause length='1'/>"
             "<Say voice='Polly.Matthew'>"
-            f"Repeating. {title_part}. Apply immediately."
+            f"{repeat}"
             "</Say>"
             "</Response>"
         )
@@ -139,6 +167,31 @@ class AlertManager:
             logger.exception("Failed to initiate voice call for %s", payload.company)
             return False
 
+    def _http_header_value(self, text: str) -> str:
+        """HTTP headers must be latin-1; normalize common Unicode punctuation."""
+        return (
+            text.replace("\u2014", "-")
+            .replace("\u2013", "-")
+            .replace("\u2018", "'")
+            .replace("\u2019", "'")
+            .replace("\u201c", '"')
+            .replace("\u201d", '"')
+        )
+
+    def _push_title(self, payload: AlertPayload) -> str:
+        headline = self._http_header_value(self._headline(payload))
+        if payload.tier == "high":
+            return f"HIGH: {headline}"
+        return headline
+
+    def _push_body(self, payload: AlertPayload) -> str:
+        apply_url = self._apply_url(payload)
+        parts = [payload.trigger_keyword]
+        if payload.relevance_score > 0:
+            parts.append(f"score {payload.relevance_score}")
+        parts.append(f"Apply: {apply_url}")
+        return " | ".join(parts)
+
     def send_push(self, payload: AlertPayload) -> bool:
         if not self._settings.ntfy_topic:
             logger.error("Push skipped: NTFY_TOPIC is not configured")
@@ -147,22 +200,13 @@ class AlertManager:
         apply_url = self._apply_url(payload)
         url = f"{NTFY_BASE_URL}/{self._settings.ntfy_topic}"
         is_high = payload.tier == "high"
-        score_line = self._score_line(payload)
         headers = {
-            "Title": (
-                f"{'🔥 ' if is_high else ''}{self._headline(payload)}"
-            ),
+            "Title": self._push_title(payload),
             "Priority": "urgent" if is_high else "default",
             "Tags": "rotating_light,briefcase" if is_high else "briefcase",
             "Click": apply_url,
         }
-        body_parts = [f"Keyword '{payload.trigger_keyword}' detected."]
-        if score_line:
-            body_parts.append(f"{score_line} · Apply within 3 hours!")
-        else:
-            body_parts.append("Apply within 3 hours!")
-        body_parts.append(f"Link: {apply_url}")
-        body = " ".join(body_parts)
+        body = self._push_body(payload)
 
         try:
             response = requests.post(
@@ -278,3 +322,8 @@ class AlertManager:
             )
 
         return channels
+
+    @staticmethod
+    def any_success(results: dict[str, bool]) -> bool:
+        """Return True when at least one alert channel succeeded."""
+        return any(results.values())

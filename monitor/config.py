@@ -38,6 +38,7 @@ class Settings:
     request_timeout: int = 15
     min_alert_interval: int = 3600
     user_agent: str = DEFAULT_USER_AGENT
+    monitor_db_path: str = str(DEFAULT_DB_PATH)
 
 
 def _env_int(name: str, default: int) -> int:
@@ -65,6 +66,7 @@ def get_settings() -> Settings:
         request_timeout=_env_int("REQUEST_TIMEOUT", 15),
         min_alert_interval=_env_int("MIN_ALERT_INTERVAL", 3600),
         user_agent=os.getenv("USER_AGENT") or DEFAULT_USER_AGENT,
+        monitor_db_path=os.getenv("MONITOR_DB_PATH") or str(DEFAULT_DB_PATH),
     )
 
 

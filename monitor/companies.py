@@ -47,7 +47,7 @@ COMPANIES: list[CompanyConfig] = [
         name="Google",
         url="https://careers.google.com/jobs/results/?employment_type=INTERN",
         keywords=DEFAULT_KEYWORDS,
-        enabled=True,
+        enabled=False,  # JS-rendered careers search; HTML fetch sees static shell only
     ),
     CompanyConfig(
         name="Meta",
@@ -59,13 +59,13 @@ COMPANIES: list[CompanyConfig] = [
         name="Amazon",
         url="https://www.amazon.jobs/en/search?base_query=intern",
         keywords=DEFAULT_KEYWORDS,
-        enabled=True,
+        enabled=False,  # JS-rendered job search; listings not present in raw HTML
     ),
     CompanyConfig(
         name="Apple",
         url="https://jobs.apple.com/en-us/search?search=intern&sort=newest",
         keywords=STRICT_INTERN_KEYWORDS,
-        enabled=True,
+        enabled=False,  # JS-rendered jobs.apple.com search; no scrapeable listings in HTML
     ),
     CompanyConfig(
         name="OpenAI",
@@ -92,7 +92,7 @@ COMPANIES: list[CompanyConfig] = [
         name="Uber",
         url="https://www.uber.com/api/loadSearchJobsResults?localeCode=en&query=intern",
         keywords=FILTERED_INTERN_KEYWORDS,
-        enabled=True,  # Greenhouse board 404; careers search JSON API (POST)
+        enabled=True,  # Greenhouse board 404; careers search JSON API (POST, max 100 results)
     ),
     CompanyConfig(
         name="Waymo",
@@ -212,7 +212,7 @@ COMPANIES: list[CompanyConfig] = [
         name="NVIDIA",
         url="https://jobs.nvidia.com/careers?filter_job_type=intern+%28fixed+term%29",
         keywords=FILTERED_INTERN_KEYWORDS,
-        enabled=True,
+        enabled=False,  # SPA careers portal; internship listings require client-side render
     ),
     CompanyConfig(
         name="Stripe",
@@ -322,7 +322,7 @@ COMPANIES: list[CompanyConfig] = [
             "pathfinders",
             "summer 2027",
         ],
-        enabled=True,
+        enabled=False,  # Next.js early-career page; listings embedded via JS
     ),
     CompanyConfig(
         name="Discord",

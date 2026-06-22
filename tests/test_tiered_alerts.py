@@ -50,6 +50,88 @@ def sample_payload() -> AlertPayload:
     )
 
 
+class TestVoiceDatetime:
+    def test_formats_iso_timestamp_for_speech(self) -> None:
+        assert (
+            AlertManager._format_voice_datetime("2027-01-16T02:34:00+00:00")
+            == "January 15th, 9:34 PM EST"
+        )
+        assert (
+            AlertManager._format_voice_datetime("2027-06-21T01:34:00+00:00")
+            == "June 20th, 9:34 PM EDT"
+        )
+
+    def test_returns_original_on_invalid_timestamp(self) -> None:
+        assert AlertManager._format_voice_datetime("not-a-date") == "not-a-date"
+
+
+class TestPushNotificationContent:
+    @pytest.mark.parametrize(
+        ("job_url", "company_url", "expected_url"),
+        [
+            (
+                "https://boards.greenhouse.io/skydio/jobs/123",
+                "https://boards.greenhouse.io/skydio",
+                "https://boards.greenhouse.io/skydio/jobs/123",
+            ),
+            (
+                "https://jobs.ashbyhq.com/skydio/abc-123",
+                "https://api.ashbyhq.com/posting-api/job-board/skydio",
+                "https://jobs.ashbyhq.com/skydio/abc-123",
+            ),
+            (
+                "https://nvidia.wd5.myworkdayjobs.com/en-US/NVIDIAExternalCareerSite/job/US-CA-Santa-Clara/Intern_123",
+                "https://nvidia.wd5.myworkdayjobs.com/wday/cxs/nvidia/NVIDIAExternalCareerSite/jobs",
+                "https://nvidia.wd5.myworkdayjobs.com/en-US/NVIDIAExternalCareerSite/job/US-CA-Santa-Clara/Intern_123",
+            ),
+            (
+                "",
+                "https://example.com/careers",
+                "https://example.com/careers",
+            ),
+        ],
+    )
+    def test_push_body_includes_apply_url_for_board_types(
+        self,
+        manager: AlertManager,
+        sample_payload: AlertPayload,
+        job_url: str,
+        company_url: str,
+        expected_url: str,
+    ) -> None:
+        payload = replace(
+            sample_payload,
+            job_url=job_url,
+            url=company_url if not job_url else job_url,
+        )
+        body = manager._push_body(payload)
+        assert f"Apply: {expected_url}" in body
+
+    @patch("monitor.alerts.requests.post")
+    def test_send_push_includes_url_in_body_and_click_header(
+        self,
+        mock_post,
+        manager: AlertManager,
+        sample_payload: AlertPayload,
+    ) -> None:
+        mock_post.return_value.raise_for_status = lambda: None
+        payload = replace(
+            sample_payload,
+            job_url="https://boards.greenhouse.io/skydio/jobs/456",
+            url="https://boards.greenhouse.io/skydio/jobs/456",
+        )
+
+        assert manager.send_push(payload) is True
+
+        mock_post.assert_called_once()
+        _, kwargs = mock_post.call_args
+        headers = kwargs["headers"]
+        body = kwargs["data"].decode("utf-8")
+        assert headers["Click"] == "https://boards.greenhouse.io/skydio/jobs/456"
+        assert "Apply: https://boards.greenhouse.io/skydio/jobs/456" in body
+        assert headers["Title"] == "Skydio - Computer Vision Intern - Perception"
+
+
 class TestFireTierRouting:
     def test_standard_tier_sends_push_and_email(
         self, manager: AlertManager, sample_payload: AlertPayload

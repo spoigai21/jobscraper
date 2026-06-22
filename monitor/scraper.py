@@ -31,6 +31,10 @@ from monitor.parsers.tesla import (
     tesla_jobs_to_text,
 )
 from monitor.models import AlertPayload, CompanyConfig, JobPosting, StateRecord
+from monitor.notification_keywords import (
+    select_notification_keywords,
+    title_from_diff_snippet,
+)
 from monitor.profile import UserProfile
 from monitor.scoring import classify_tier, score_job, should_exclude
 
@@ -55,6 +59,9 @@ _WORKDAY_PAGE_LIMIT = 20
 
 # Eightfold PCSX search returns 10 results per page regardless of limit param.
 _MICROSOFT_PAGE_SIZE = 10
+
+# Safety cap for Workday/Microsoft pagination loops when API totals are wrong.
+_MAX_PAGINATION_PAGES = 50
 
 # Default job-related terms used when scanning diff segments.
 _DEFAULT_JOB_TERMS: tuple[str, ...] = (
@@ -240,8 +247,17 @@ class CareerPageScraper:
         all_postings: list[dict] = []
         total: int | None = None
         offset = 0
+        pages_fetched = 0
 
         while True:
+            pages_fetched += 1
+            if pages_fetched > _MAX_PAGINATION_PAGES:
+                logger.warning(
+                    "Workday pagination stopped at %d pages for %s",
+                    _MAX_PAGINATION_PAGES,
+                    url,
+                )
+                break
             payload = {
                 "appliedFacets": {},
                 "limit": page_limit,
@@ -297,8 +313,17 @@ class CareerPageScraper:
         all_positions: list[dict] = []
         total: int | None = None
         start = 0
+        pages_fetched = 0
 
         while True:
+            pages_fetched += 1
+            if pages_fetched > _MAX_PAGINATION_PAGES:
+                logger.warning(
+                    "Microsoft pagination stopped at %d pages for %s",
+                    _MAX_PAGINATION_PAGES,
+                    url,
+                )
+                break
             response = requests.get(
                 request_url,
                 params={
@@ -649,17 +674,124 @@ class CareerPageScraper:
         if meta:
             diff_snippet = f"{diff_snippet} ({meta})"
 
+        searchable = " ".join(
+            part
+            for part in (job.title, job.department, job.location, job.description)
+            if part
+        )
+        notification_keywords = select_notification_keywords(
+            searchable,
+            profile=self._profile,
+            trigger_keyword=trigger_keyword,
+        )
+
         return AlertPayload(
             company=company.name,
             url=job_url,
             job_title=job.title,
             job_url=job_url,
+            job_id=job.id,
             relevance_score=score,
             tier=tier,
             trigger_keyword=trigger_keyword,
             detected_at=now_iso,
             diff_snippet=diff_snippet[:300],
+            notification_keywords=notification_keywords,
         )
+
+    def _is_cooldown_active(self, state: StateRecord, now: datetime) -> bool:
+        if state.last_alerted is None:
+            return False
+        last_alerted = datetime.fromisoformat(state.last_alerted)
+        elapsed = (now - last_alerted).total_seconds()
+        return elapsed <= self._settings.min_alert_interval
+
+    def _log_cooldown_suppression(
+        self, company: CompanyConfig, state: StateRecord, now: datetime
+    ) -> None:
+        last_alerted = datetime.fromisoformat(state.last_alerted)  # type: ignore[arg-type]
+        elapsed = (now - last_alerted).total_seconds()
+        logger.info(
+            "Suppressing alert for %s: %.0fs since last alert (min interval %ds)",
+            company.name,
+            elapsed,
+            self._settings.min_alert_interval,
+        )
+
+    @staticmethod
+    def merge_seen_job_id(state: StateRecord, job_id: str) -> None:
+        seen_ids = CareerPageScraper._load_seen_job_ids(state)
+        seen_ids.add(job_id)
+        CareerPageScraper._save_seen_job_ids(state, seen_ids)
+
+    def _poll_by_job_ids(
+        self,
+        company: CompanyConfig,
+        state: StateRecord,
+        jobs: list[JobPosting],
+        text: str,
+        now: datetime,
+        now_iso: str,
+        *,
+        seed_label: str = "job",
+    ) -> list[AlertPayload]:
+        """Detect new listings by diffing stable job IDs."""
+        seen_ids = self._load_seen_job_ids(state)
+
+        state.last_hash = self.hash_content(text)
+        state.last_text = text
+        state.last_checked = now_iso
+
+        if not seen_ids:
+            current_ids = {job.id for job in jobs}
+            self._save_seen_job_ids(state, current_ids)
+            logger.debug(
+                "Seeding %s IDs for %s (%d listings)",
+                seed_label,
+                company.name,
+                len(current_ids),
+            )
+            return []
+
+        new_jobs = [job for job in jobs if job.id not in seen_ids]
+        if not new_jobs:
+            return []
+
+        filtered_ids: set[str] = set()
+        alert_payloads: list[AlertPayload] = []
+        for job in new_jobs:
+            payload = self._build_job_alert(job, company, now_iso)
+            if payload is None:
+                filtered_ids.add(job.id)
+            else:
+                alert_payloads.append(payload)
+
+        if filtered_ids:
+            seen_ids |= filtered_ids
+            self._save_seen_job_ids(state, seen_ids)
+
+        if not alert_payloads:
+            logger.debug(
+                "Ignoring %d new listings for %s (filtered out)",
+                len(new_jobs),
+                company.name,
+            )
+            return []
+
+        if self._is_cooldown_active(state, now):
+            self._log_cooldown_suppression(company, state, now)
+            return []
+
+        for payload in alert_payloads:
+            logger.info(
+                "Alert triggered for %s (%r, score=%d, tier=%s)",
+                company.name,
+                payload.job_title or payload.trigger_keyword,
+                payload.relevance_score,
+                payload.tier,
+            )
+
+        return alert_payloads
 
     def _poll_per_job_board(
         self,
@@ -671,68 +803,14 @@ class CareerPageScraper:
     ) -> list[AlertPayload]:
         """Detect new listings on Greenhouse, Ashby, or Lever JSON boards."""
         jobs = parse_job_board(raw, company.url, company.name)
-        current_ids = {job.id for job in jobs}
-        seen_ids = self._load_seen_job_ids(state)
-
-        text = jobs_to_text(jobs)
-        state.last_hash = self.hash_content(text)
-        state.last_text = text
-        state.last_checked = now_iso
-
-        if not seen_ids:
-            self._save_seen_job_ids(state, current_ids)
-            logger.debug(
-                "Seeding job IDs for %s (%d listings)",
-                company.name,
-                len(current_ids),
-            )
-            return []
-
-        new_jobs = [job for job in jobs if job.id not in seen_ids]
-        self._save_seen_job_ids(state, current_ids)
-
-        if not new_jobs:
-            return []
-
-        alerts = [
-            payload
-            for job in new_jobs
-            if (payload := self._build_job_alert(job, company, now_iso)) is not None
-        ]
-        if not alerts:
-            logger.debug(
-                "Ignoring %d new listings for %s (filtered out)",
-                len(new_jobs),
-                company.name,
-            )
-            return []
-
-        if state.last_alerted is not None:
-            last_alerted = datetime.fromisoformat(state.last_alerted)
-            elapsed = (now - last_alerted).total_seconds()
-            if elapsed <= self._settings.min_alert_interval:
-                logger.info(
-                    "Suppressing alert for %s: %.0fs since last alert "
-                    "(min interval %ds)",
-                    company.name,
-                    elapsed,
-                    self._settings.min_alert_interval,
-                )
-                return []
-
-        state.last_alerted = now_iso
-        state.alert_count += len(alerts)
-
-        for payload in alerts:
-            logger.info(
-                "Alert triggered for %s (%r, score=%d, tier=%s)",
-                company.name,
-                payload.job_title or payload.trigger_keyword,
-                payload.relevance_score,
-                payload.tier,
-            )
-
-        return alerts
+        return self._poll_by_job_ids(
+            company,
+            state,
+            jobs,
+            jobs_to_text(jobs),
+            now,
+            now_iso,
+        )
 
     def _poll_nasa(
         self,
@@ -748,68 +826,15 @@ class CareerPageScraper:
             return []
 
         jobs = parse_nasa_html(html, company.name, base_url=company.url)
-        current_ids = {job.id for job in jobs}
-        seen_ids = self._load_seen_job_ids(state)
-
-        text = nasa_jobs_to_text(jobs)
-        state.last_hash = self.hash_content(text)
-        state.last_text = text
-        state.last_checked = now_iso
-
-        if not seen_ids:
-            self._save_seen_job_ids(state, current_ids)
-            logger.debug(
-                "Seeding NASA job IDs for %s (%d listings)",
-                company.name,
-                len(current_ids),
-            )
-            return []
-
-        new_jobs = [job for job in jobs if job.id not in seen_ids]
-        self._save_seen_job_ids(state, current_ids)
-
-        if not new_jobs:
-            return []
-
-        alerts = [
-            payload
-            for job in new_jobs
-            if (payload := self._build_job_alert(job, company, now_iso)) is not None
-        ]
-        if not alerts:
-            logger.debug(
-                "Ignoring %d new NASA listings for %s (filtered out)",
-                len(new_jobs),
-                company.name,
-            )
-            return []
-
-        if state.last_alerted is not None:
-            last_alerted = datetime.fromisoformat(state.last_alerted)
-            elapsed = (now - last_alerted).total_seconds()
-            if elapsed <= self._settings.min_alert_interval:
-                logger.info(
-                    "Suppressing alert for %s: %.0fs since last alert "
-                    "(min interval %ds)",
-                    company.name,
-                    elapsed,
-                    self._settings.min_alert_interval,
-                )
-                return []
-
-        state.last_alerted = now_iso
-        state.alert_count += len(alerts)
-
-        for payload in alerts:
-            logger.info(
-                "Alert triggered for %s (%r, score=%d, tier=%s)",
-                company.name,
-                payload.job_title or payload.trigger_keyword,
-                payload.relevance_score,
-                payload.tier,
-            )
-
-        return alerts
+        return self._poll_by_job_ids(
+            company,
+            state,
+            jobs,
+            nasa_jobs_to_text(jobs),
+            now,
+            now_iso,
+            seed_label="NASA job",
+        )
 
     def _poll_tesla(
         self,
@@ -826,68 +851,15 @@ class CareerPageScraper:
             return []
 
         jobs = parse_tesla_state(raw, company.name, source_url=company.url)
-        current_ids = {job.id for job in jobs}
-        seen_ids = self._load_seen_job_ids(state)
-
-        text = tesla_jobs_to_text(jobs)
-        state.last_hash = self.hash_content(text)
-        state.last_text = text
-        state.last_checked = now_iso
-
-        if not seen_ids:
-            self._save_seen_job_ids(state, current_ids)
-            logger.debug(
-                "Seeding Tesla job IDs for %s (%d listings)",
-                company.name,
-                len(current_ids),
-            )
-            return []
-
-        new_jobs = [job for job in jobs if job.id not in seen_ids]
-        self._save_seen_job_ids(state, current_ids)
-
-        if not new_jobs:
-            return []
-
-        alerts = [
-            payload
-            for job in new_jobs
-            if (payload := self._build_job_alert(job, company, now_iso)) is not None
-        ]
-        if not alerts:
-            logger.debug(
-                "Ignoring %d new Tesla listings for %s (filtered out)",
-                len(new_jobs),
-                company.name,
-            )
-            return []
-
-        if state.last_alerted is not None:
-            last_alerted = datetime.fromisoformat(state.last_alerted)
-            elapsed = (now - last_alerted).total_seconds()
-            if elapsed <= self._settings.min_alert_interval:
-                logger.info(
-                    "Suppressing alert for %s: %.0fs since last alert "
-                    "(min interval %ds)",
-                    company.name,
-                    elapsed,
-                    self._settings.min_alert_interval,
-                )
-                return []
-
-        state.last_alerted = now_iso
-        state.alert_count += len(alerts)
-
-        for payload in alerts:
-            logger.info(
-                "Alert triggered for %s (%r, score=%d, tier=%s)",
-                company.name,
-                payload.job_title or payload.trigger_keyword,
-                payload.relevance_score,
-                payload.tier,
-            )
-
-        return alerts
+        return self._poll_by_job_ids(
+            company,
+            state,
+            jobs,
+            tesla_jobs_to_text(jobs),
+            now,
+            now_iso,
+            seed_label="Tesla job",
+        )
 
     def poll_company(
         self,
@@ -933,8 +905,6 @@ class CareerPageScraper:
             previous_hash = state.last_hash
             hash_changed = content_hash != previous_hash
 
-            state.last_hash = content_hash
-            state.last_text = text
             state.last_checked = now_iso
 
             if not hash_changed:
@@ -942,6 +912,8 @@ class CareerPageScraper:
 
             # First successful poll seeds baseline text without alerting.
             if not previous_hash:
+                state.last_hash = content_hash
+                state.last_text = text
                 logger.debug(
                     "Seeding baseline for %s (hash=%s…)",
                     company.name,
@@ -954,6 +926,8 @@ class CareerPageScraper:
             if matched_keyword is None and not self._is_substantial_change(
                 previous_text, text, job_snippet
             ):
+                state.last_hash = content_hash
+                state.last_text = text
                 logger.debug(
                     "Ignoring trivial change for %s (no substantial diff)",
                     company.name,
@@ -961,20 +935,13 @@ class CareerPageScraper:
                 return []
 
             if matched_keyword is None and job_snippet is None:
+                state.last_hash = content_hash
+                state.last_text = text
                 return []
 
-            if state.last_alerted is not None:
-                last_alerted = datetime.fromisoformat(state.last_alerted)
-                elapsed = (now - last_alerted).total_seconds()
-                if elapsed <= self._settings.min_alert_interval:
-                    logger.info(
-                        "Suppressing alert for %s: %.0fs since last alert "
-                        "(min interval %ds)",
-                        company.name,
-                        elapsed,
-                        self._settings.min_alert_interval,
-                    )
-                    return []
+            if self._is_cooldown_active(state, now):
+                self._log_cooldown_suppression(company, state, now)
+                return []
 
             diff_snippet = self.get_diff_snippet(
                 previous_text,
@@ -982,24 +949,36 @@ class CareerPageScraper:
                 company.keywords,
             )
             trigger_keyword = matched_keyword or "job listing"
-
-            state.last_alerted = now_iso
-            state.alert_count += 1
+            job_title = title_from_diff_snippet(diff_snippet)
+            searchable = " ".join(
+                part
+                for part in (job_title, text, diff_snippet, trigger_keyword)
+                if part
+            )
+            notification_keywords = select_notification_keywords(
+                searchable,
+                profile=self._profile,
+                trigger_keyword=trigger_keyword,
+            )
 
             logger.info(
-                "Alert triggered for %s (keyword=%r, alert_count=%d)",
+                "Alert triggered for %s (keyword=%r)",
                 company.name,
                 trigger_keyword,
-                state.alert_count,
             )
 
             return [
                 AlertPayload(
                     company=company.name,
                     url=company.url,
+                    job_title=job_title,
+                    job_url=company.url,
                     trigger_keyword=trigger_keyword,
                     detected_at=now_iso,
                     diff_snippet=diff_snippet,
+                    notification_keywords=notification_keywords,
+                    pending_hash=content_hash,
+                    pending_text=text,
                 )
             ]
         except Exception:

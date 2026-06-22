@@ -68,11 +68,27 @@ def run_poll_cycle(
             if payloads:
                 for payload in payloads:
                     results = alert_manager.fire(payload)
-                    store.log_alert(payload, results)
-                    alerts_fired += 1
-                    label = payload.job_title or payload.trigger_keyword
-                    tier_tag = f" [{payload.tier}]" if payload.tier != "standard" else ""
-                    print(f"ALERT {company.name} ({label}){tier_tag}")
+                    if alert_manager.any_success(results):
+                        store.log_alert(payload, results)
+                        if payload.job_id:
+                            CareerPageScraper.merge_seen_job_id(state, payload.job_id)
+                        elif payload.pending_hash:
+                            state.last_hash = payload.pending_hash
+                            state.last_text = payload.pending_text
+                        state.last_alerted = payload.detected_at
+                        state.alert_count += 1
+                        alerts_fired += 1
+                        label = payload.job_title or payload.trigger_keyword
+                        tier_tag = (
+                            f" [{payload.tier}]" if payload.tier != "standard" else ""
+                        )
+                        print(f"ALERT {company.name} ({label}){tier_tag}")
+                    else:
+                        logger.warning(
+                            "Delivery failed for %s (%s); will retry next poll",
+                            company.name,
+                            payload.job_title or payload.trigger_keyword,
+                        )
             else:
                 print(f"OK   {company.name}")
 
@@ -109,7 +125,7 @@ def main() -> None:
             profile.user.name,
             profile.alerts.high_score_threshold,
         )
-    store = StateStore()
+    store = StateStore(settings.monitor_db_path)
     scraper = CareerPageScraper(settings, profile)
     alert_manager = AlertManager(settings, profile)
 

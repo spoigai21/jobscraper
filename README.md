@@ -161,7 +161,20 @@ railway variables set ALERT_EMAIL_TO=you@gmail.com
 
 Optional tuning variables (`POLL_INTERVAL_BUSINESS`, `POLL_INTERVAL_OVERNIGHT`, etc.) can be set the same way.
 
-### 4. Deploy
+### 4. Attach persistent storage (recommended)
+
+By default Railway uses an ephemeral filesystem — `monitor.db` is reset on every redeploy, which re-seeds all companies and can miss listings that appeared during downtime.
+
+1. In the Railway dashboard, add a **Volume** to your service (e.g. mount path `/data`).
+2. Set the database path:
+
+```bash
+railway variables set MONITOR_DB_PATH=/data/monitor.db
+```
+
+Poll state (`seen_job_ids`, cooldown timestamps) and alert history then survive redeploys.
+
+### 5. Deploy
 
 ```bash
 railway up
@@ -247,7 +260,7 @@ Upgrade to a paid Twilio account when you are ready to deploy long-term.
 |---------|----------------|
 | No email alerts | Wrong app password, or 2FA not enabled on Gmail |
 | No push notifications | Topic mismatch between `.env` and Ntfy app subscription |
-| `monitor.db` errors on Railway | Ephemeral filesystem — state resets on redeploy (alerts still work) |
+| `monitor.db` errors on Railway | Missing volume — set `MONITOR_DB_PATH` to a mounted volume path (see Deploy section) |
 | Import errors | Run `pip install -r requirements.txt` inside your virtualenv |
 
 Check `monitor.log` in the project root for detailed error messages.

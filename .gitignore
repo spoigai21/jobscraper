@@ -1,6 +1,6 @@
 .env
 monitor.log
-monitor.db
+monitor.db*
 __pycache__/
 *.pyc
 .DS_Store

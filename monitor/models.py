@@ -34,8 +34,12 @@ class AlertPayload:
     diff_snippet: str
     job_title: str = ""
     job_url: str = ""
+    job_id: str = ""
     relevance_score: int = 0
     tier: AlertTier = "standard"
+    notification_keywords: tuple[str, ...] = ()
+    pending_hash: str = ""
+    pending_text: str = ""
 
 
 @dataclass(slots=True)

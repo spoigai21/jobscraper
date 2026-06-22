@@ -20,7 +20,9 @@ META_COMPANY_NAME = "Meta"
 SEARCH_URL = f"{META_CAREERS_BASE}/jobsearch"
 GRAPHQL_URL = f"{META_CAREERS_BASE}/api/graphql/"
 JOBS_URL = f"{META_CAREERS_BASE}/jobs/{{job_id}}/"
+MAX_META_PAGES = 10
 DOC_ID = "29615178951461218"
+
 FRIENDLY_NAME = "CareersJobSearchResultsDataQuery"
 DEFAULT_SEARCH_QUERY = "intern"
 
@@ -88,7 +90,7 @@ def _search_referer(term: str) -> str:
     return f"{SEARCH_URL}?{urlencode({'q': term})}"
 
 
-def _search_input(term: str) -> dict[str, Any]:
+def _search_input(term: str, page: int = 1) -> dict[str, Any]:
     return {
         "q": term,
         "divisions": [],
@@ -102,7 +104,7 @@ def _search_input(term: str) -> dict[str, Any]:
         "is_leadership": False,
         "is_remote_only": False,
         "sort_by_new": False,
-        "page": 1,
+        "page": page,
     }
 
 
@@ -122,6 +124,15 @@ def _clean_string_list(values: Any) -> list[str]:
     if not isinstance(values, list):
         return []
     return [str(value).strip() for value in values if str(value).strip()]
+
+
+def _extract_all_jobs(text: str) -> list[dict[str, Any]]:
+    payload = _decode_graphql_payload(text)
+    job_search = (payload.get("data") or {}).get("job_search_with_featured_jobs") or {}
+    items = job_search.get("all_jobs") or []
+    if not isinstance(items, list):
+        return []
+    return [item for item in items if isinstance(item, dict)]
 
 
 def fetch_meta_search_raw(
@@ -151,39 +162,66 @@ def fetch_meta_search_raw(
         logger.warning("Meta Careers LSD token not found in search page HTML")
         return None
 
-    data = {
-        "av": "0",
-        "__user": "0",
-        "__a": "1",
-        "__req": "1",
-        "__rev": _extract_token(_CLIENT_REVISION_RE, response.text) or "0",
-        "__hsi": _extract_token(_HSI_RE, response.text),
-        "__ccg": "GOOD",
-        "__comet_req": "15",
-        "lsd": lsd,
-        "fb_api_caller_class": "RelayModern",
-        "fb_api_req_friendly_name": FRIENDLY_NAME,
-        "variables": json.dumps(
-            {"search_input": _search_input(term)},
-            separators=(",", ":"),
-        ),
-        "server_timestamps": "true",
-        "doc_id": DOC_ID,
-    }
+    all_jobs: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    client_revision = _extract_token(_CLIENT_REVISION_RE, response.text) or "0"
+    hsi = _extract_token(_HSI_RE, response.text)
 
-    try:
-        graphql_response = session.post(
-            GRAPHQL_URL,
-            data=data,
-            headers=_graphql_headers(user_agent, referer, lsd),
-            timeout=timeout,
-        )
-        graphql_response.raise_for_status()
-    except requests.exceptions.RequestException as exc:
-        logger.warning("Meta Careers GraphQL fetch failed: %s", exc)
+    for page in range(1, MAX_META_PAGES + 1):
+        data = {
+            "av": "0",
+            "__user": "0",
+            "__a": "1",
+            "__req": "1",
+            "__rev": client_revision,
+            "__hsi": hsi,
+            "__ccg": "GOOD",
+            "__comet_req": "15",
+            "lsd": lsd,
+            "fb_api_caller_class": "RelayModern",
+            "fb_api_req_friendly_name": FRIENDLY_NAME,
+            "variables": json.dumps(
+                {"search_input": _search_input(term, page)},
+                separators=(",", ":"),
+            ),
+            "server_timestamps": "true",
+            "doc_id": DOC_ID,
+        }
+
+        try:
+            graphql_response = session.post(
+                GRAPHQL_URL,
+                data=data,
+                headers=_graphql_headers(user_agent, referer, lsd),
+                timeout=timeout,
+            )
+            graphql_response.raise_for_status()
+        except requests.exceptions.RequestException as exc:
+            logger.warning("Meta Careers GraphQL fetch failed on page %d: %s", page, exc)
+            break
+
+        page_jobs = _extract_all_jobs(graphql_response.text)
+        if not page_jobs:
+            break
+
+        for item in page_jobs:
+            job_id = str(item.get("id") or "").strip()
+            if job_id and job_id not in seen_ids:
+                seen_ids.add(job_id)
+                all_jobs.append(item)
+
+    if not all_jobs:
         return None
 
-    return graphql_response.text
+    return json.dumps(
+        {
+            "data": {
+                "job_search_with_featured_jobs": {
+                    "all_jobs": all_jobs,
+                }
+            }
+        }
+    )
 
 
 def parse_meta(raw_json: str | dict[str, Any], company_name: str) -> list[JobPosting]:

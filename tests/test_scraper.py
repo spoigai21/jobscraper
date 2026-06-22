@@ -226,8 +226,9 @@ class TestPollCompany:
         assert payload.url == company.url
         assert payload.trigger_keyword == "intern"
         assert payload.diff_snippet.startswith("New: ")
-        assert state.alert_count == 3
-        assert state.last_alerted is not None
+        assert payload.pending_hash
+        assert state.alert_count == 2
+        assert state.last_hash == "stale-hash"
 
     def test_no_alert_when_within_min_alert_interval(
         self, scraper: CareerPageScraper, company: CompanyConfig
@@ -246,6 +247,40 @@ class TestPollCompany:
 
         assert result == []
         assert state.alert_count == 0
+        assert state.last_hash == "stale-hash"
+        assert state.last_text == "legacy staff engineer listings only"
+
+    def test_html_cooldown_preserves_hash_then_alerts_after_interval(
+        self, scraper: CareerPageScraper, company: CompanyConfig
+    ) -> None:
+        html = _sample_html("new summer intern 2027 opening posted today")
+        cooldown_state = self._state(
+            last_hash="stale-hash",
+            last_text="legacy staff engineer listings only",
+            last_alerted=(
+                datetime.now(timezone.utc) - timedelta(seconds=100)
+            ).isoformat(),
+        )
+
+        with patch.object(scraper, "fetch", return_value=html):
+            blocked = scraper.poll_company(company, cooldown_state)
+
+        assert blocked == []
+        assert cooldown_state.last_hash == "stale-hash"
+
+        ready_state = self._state(
+            last_hash="stale-hash",
+            last_text="legacy staff engineer listings only",
+            last_alerted=(
+                datetime.now(timezone.utc) - timedelta(seconds=7200)
+            ).isoformat(),
+        )
+
+        with patch.object(scraper, "fetch", return_value=html):
+            result = scraper.poll_company(company, ready_state)
+
+        assert len(result) == 1
+        assert result[0].pending_hash
 
     def test_first_poll_with_empty_previous_hash(
         self, scraper: CareerPageScraper, company: CompanyConfig
@@ -338,7 +373,42 @@ class TestPollPerJobBoard:
         assert payload.job_title == "Software Engineering Intern Summer 2027"
         assert payload.relevance_score > 0
         assert payload.tier in ("standard", "high")
-        assert json.loads(state.seen_job_ids) == ["501"]
+        assert payload.job_id == "501"
+        assert json.loads(state.seen_job_ids) == ["999"]
+
+    def test_cooldown_does_not_consume_new_job_id(
+        self,
+        profiled_scraper: CareerPageScraper,
+        greenhouse_company: CompanyConfig,
+    ) -> None:
+        state = StateRecord(
+            company="Waymo",
+            url=greenhouse_company.url,
+            last_hash="seeded",
+            last_checked="",
+            last_alerted=(
+                datetime.now(timezone.utc) - timedelta(seconds=100)
+            ).isoformat(),
+            alert_count=0,
+            seen_job_ids='["999"]',
+        )
+
+        with patch.object(profiled_scraper, "fetch", return_value=GREENHOUSE_BOARD_JSON):
+            blocked = profiled_scraper.poll_company(greenhouse_company, state)
+
+        assert blocked == []
+        assert json.loads(state.seen_job_ids) == ["999"]
+
+        state.last_alerted = (
+            datetime.now(timezone.utc) - timedelta(seconds=7200)
+        ).isoformat()
+
+        with patch.object(profiled_scraper, "fetch", return_value=GREENHOUSE_BOARD_JSON):
+            result = profiled_scraper.poll_company(greenhouse_company, state)
+
+        assert len(result) == 1
+        assert result[0].job_id == "501"
+        assert json.loads(state.seen_job_ids) == ["999"]
 
 
 WORKDAY_BOARD_JSON = json.dumps(
@@ -462,7 +532,7 @@ class TestPollWorkdayBoard:
             result = profiled_scraper.poll_company(workday_company, state)
 
         assert result == []
-        assert set(json.loads(state.seen_job_ids)) == {"JR501", "JR777"}
+        assert set(json.loads(state.seen_job_ids)) == {"JR501", "JR777", "JR999"}
 
 
 WORKDAY_URL = (

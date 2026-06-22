@@ -100,7 +100,7 @@ def status() -> None:
     """Show monitoring status for all configured companies."""
     setup_logging()
     settings = get_settings()
-    store = StateStore()
+    store = StateStore(settings.monitor_db_path)
     states = {record.company: record for record in store.get_all_states()}
     poll_interval = get_poll_interval(settings)
 
@@ -140,7 +140,8 @@ def status() -> None:
 def alerts(limit: int) -> None:
     """List recent alerts and per-channel delivery results."""
     setup_logging()
-    store = StateStore()
+    settings = get_settings()
+    store = StateStore(settings.monitor_db_path)
     rows = store.get_recent_alerts(limit=limit)
 
     if not rows:
