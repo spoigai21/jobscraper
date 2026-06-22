@@ -43,3 +43,4 @@ class TestParseMetaGraphql:
         assert jobs[0].location == "Redmond, WA"
         assert jobs[0].url.endswith("/1760132191666571/")
         assert "AI Research" in jobs[0].department
+        assert "Machine Learning" in jobs[2].description

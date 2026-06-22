@@ -16,6 +16,7 @@ from twilio.rest import Client
 
 from monitor.config import Settings
 from monitor.models import AlertPayload, AlertTier
+from monitor.notification_keywords import title_from_diff_snippet
 from monitor.profile import AlertChannel, UserProfile
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,11 @@ class AlertManager:
     def _score_line(self, payload: AlertPayload) -> str:
         if payload.relevance_score > 0:
             return f"Score {payload.relevance_score}"
+        return ""
+
+    def _priority_score_line(self, payload: AlertPayload) -> str:
+        if payload.relevance_score > 0:
+            return f"Priority score: {payload.relevance_score}"
         return ""
 
     @staticmethod
@@ -178,19 +184,59 @@ class AlertManager:
             .replace("\u201d", '"')
         )
 
+    def _push_role_line(self, payload: AlertPayload) -> str:
+        role = self._http_header_value(
+            payload.job_title
+            or title_from_diff_snippet(payload.diff_snippet)
+            or "internship"
+        )
+        company = self._http_header_value(payload.company)
+        return f"{company} - {role}"
+
     def _push_title(self, payload: AlertPayload) -> str:
-        headline = self._http_header_value(self._headline(payload))
+        headline = self._push_role_line(payload)
         if payload.tier == "high":
             return f"HIGH: {headline}"
         return headline
 
     def _push_body(self, payload: AlertPayload) -> str:
+        keywords = payload.notification_keywords
+        if not keywords and payload.trigger_keyword:
+            keywords = (payload.trigger_keyword,)
+        keyword_text = ", ".join(keywords)
         apply_url = self._apply_url(payload)
-        parts = [payload.trigger_keyword]
-        if payload.relevance_score > 0:
-            parts.append(f"score {payload.relevance_score}")
-        parts.append(f"Apply: {apply_url}")
-        return " | ".join(parts)
+
+        lines = [self._push_role_line(payload)]
+        if keyword_text:
+            lines.append(f"Keywords detected: {keyword_text}")
+        lines.append(f"Application: {apply_url}")
+        return "\n".join(lines)
+
+    def _email_subject(self, payload: AlertPayload) -> str:
+        return self._push_title(payload)
+
+    def _email_body(self, payload: AlertPayload) -> str:
+        keywords = payload.notification_keywords
+        if not keywords and payload.trigger_keyword:
+            keywords = (payload.trigger_keyword,)
+        keyword_text = ", ".join(keywords)
+        apply_url = self._apply_url(payload)
+        detected_at = self._format_voice_datetime(payload.detected_at)
+
+        lines = [self._push_role_line(payload), ""]
+        lines.append(f"Tier: {payload.tier}")
+        priority_score = self._priority_score_line(payload)
+        if priority_score:
+            lines.append(priority_score)
+        lines.append("")
+        if keyword_text:
+            lines.append(f"Keywords detected: {keyword_text}")
+        lines.append(f"Application: {apply_url}")
+        lines.append(f"Detected: {detected_at}")
+        if payload.diff_snippet:
+            lines.extend(["", payload.diff_snippet])
+        lines.extend(["", "Sent by your internship monitor"])
+        return "\n".join(lines)
 
     def send_push(self, payload: AlertPayload) -> bool:
         if not self._settings.ntfy_topic:
@@ -203,7 +249,6 @@ class AlertManager:
         headers = {
             "Title": self._push_title(payload),
             "Priority": "urgent" if is_high else "default",
-            "Tags": "rotating_light,briefcase" if is_high else "briefcase",
             "Click": apply_url,
         }
         body = self._push_body(payload)
@@ -233,19 +278,8 @@ class AlertManager:
             logger.error("Email skipped: Gmail SMTP credentials are not configured")
             return False
 
-        apply_url = self._apply_url(payload)
-        score_line = self._score_line(payload)
-        subject = f"INTERN ALERT: {self._headline(payload)} - apply NOW"
-        body = (
-            f"Internship alert for {self._headline(payload)}\n"
-            f"Tier: {payload.tier}\n"
-            f"{score_line + chr(10) if score_line else ''}"
-            f"Keyword: {payload.trigger_keyword}\n"
-            f"Apply: {apply_url}\n"
-            f"Detected: {payload.detected_at}\n\n"
-            f"Change preview:\n{payload.diff_snippet}\n\n"
-            "Sent by your internship monitor"
-        )
+        subject = self._email_subject(payload)
+        body = self._email_body(payload)
 
         message = MIMEText(body, "plain", "utf-8")
         message["Subject"] = subject

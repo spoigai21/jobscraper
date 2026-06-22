@@ -248,9 +248,16 @@ def parse_meta(raw_json: str | dict[str, Any], company_name: str) -> list[JobPos
         locations = _clean_string_list(item.get("locations"))
         teams = _clean_string_list(item.get("teams"))
         sub_teams = _clean_string_list(item.get("sub_teams"))
-        description_parts = []
+        roles = _clean_string_list(item.get("roles"))
+        description_parts: list[str] = []
+        if teams:
+            description_parts.append(", ".join(teams))
         if sub_teams:
-            description_parts.append(f"Sub-teams: {', '.join(sub_teams)}")
+            description_parts.append(", ".join(sub_teams))
+        if roles:
+            description_parts.append(", ".join(roles))
+        if locations:
+            description_parts.append(", ".join(locations))
 
         postings.append(
             JobPosting(

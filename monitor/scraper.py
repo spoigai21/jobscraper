@@ -22,6 +22,7 @@ from monitor.parsers.boards import (
     jobs_to_text,
     parse_job_board,
 )
+from monitor.parsers.html import parse_html_jobs
 from monitor.parsers.meta import fetch_meta_search_raw, is_meta_jobs_url
 from monitor.parsers.nasa import is_nasa_company, nasa_jobs_to_text, parse_nasa_html
 from monitor.parsers.tesla import (
@@ -897,6 +898,19 @@ class CareerPageScraper:
 
             if self._is_per_job_board_url(company.url):
                 return self._poll_per_job_board(company, state, html, now, now_iso)
+
+            if detect_board_type(company.url) == BoardType.HTML:
+                html_jobs = parse_html_jobs(html, company.url, company.name)
+                if html_jobs:
+                    return self._poll_by_job_ids(
+                        company,
+                        state,
+                        html_jobs,
+                        jobs_to_text(html_jobs),
+                        now,
+                        now_iso,
+                        seed_label="HTML job",
+                    )
 
             text = self.extract_text(html, company.url)
             content_hash = self.hash_content(text)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from email import message_from_string
 from unittest.mock import patch
 
 import pytest
@@ -47,6 +48,7 @@ def sample_payload() -> AlertPayload:
         job_url="https://boards.greenhouse.io/skydio/jobs/123",
         relevance_score=11,
         tier="standard",
+        notification_keywords=("intern", "summer 2027", "Python", "OpenCV"),
     )
 
 
@@ -66,6 +68,28 @@ class TestVoiceDatetime:
 
 
 class TestPushNotificationContent:
+    def test_push_body_format(self, manager: AlertManager, sample_payload: AlertPayload) -> None:
+        body = manager._push_body(sample_payload)
+        expected = (
+            "Skydio - Computer Vision Intern - Perception\n"
+            "Keywords detected: intern, summer 2027, Python, OpenCV\n"
+            "Application: https://boards.greenhouse.io/skydio/jobs/123"
+        )
+        assert body == expected
+
+    def test_push_title_uses_company_and_role(self, manager: AlertManager, sample_payload: AlertPayload) -> None:
+        assert (
+            manager._push_title(sample_payload)
+            == "Skydio - Computer Vision Intern - Perception"
+        )
+
+    def test_push_title_high_tier_prefix(self, manager: AlertManager, sample_payload: AlertPayload) -> None:
+        payload = replace(sample_payload, tier="high")
+        assert (
+            manager._push_title(payload)
+            == "HIGH: Skydio - Computer Vision Intern - Perception"
+        )
+
     @pytest.mark.parametrize(
         ("job_url", "company_url", "expected_url"),
         [
@@ -105,7 +129,23 @@ class TestPushNotificationContent:
             url=company_url if not job_url else job_url,
         )
         body = manager._push_body(payload)
-        assert f"Apply: {expected_url}" in body
+        assert f"Application: {expected_url}" in body
+
+    def test_push_body_html_fallback_uses_diff_snippet_title(
+        self, manager: AlertManager, sample_payload: AlertPayload
+    ) -> None:
+        payload = replace(
+            sample_payload,
+            job_title="",
+            job_url="",
+            url="https://example.com/careers",
+            diff_snippet="New: Software Engineering Intern (Remote)",
+            notification_keywords=("internship", "undergrad"),
+        )
+        body = manager._push_body(payload)
+        assert body.startswith("Skydio - Software Engineering Intern")
+        assert "Keywords detected: internship, undergrad" in body
+        assert "Application: https://example.com/careers" in body
 
     @patch("monitor.alerts.requests.post")
     def test_send_push_includes_url_in_body_and_click_header(
@@ -128,8 +168,79 @@ class TestPushNotificationContent:
         headers = kwargs["headers"]
         body = kwargs["data"].decode("utf-8")
         assert headers["Click"] == "https://boards.greenhouse.io/skydio/jobs/456"
-        assert "Apply: https://boards.greenhouse.io/skydio/jobs/456" in body
+        assert "Application: https://boards.greenhouse.io/skydio/jobs/456" in body
         assert headers["Title"] == "Skydio - Computer Vision Intern - Perception"
+        assert "Markdown" not in headers
+        assert "Tags" not in headers
+
+
+class TestEmailNotificationContent:
+    def test_email_body_format(self, manager: AlertManager, sample_payload: AlertPayload) -> None:
+        body = manager._email_body(sample_payload)
+        expected = (
+            "Skydio - Computer Vision Intern - Perception\n"
+            "\n"
+            "Tier: standard\n"
+            "Priority score: 11\n"
+            "\n"
+            "Keywords detected: intern, summer 2027, Python, OpenCV\n"
+            "Application: https://boards.greenhouse.io/skydio/jobs/123\n"
+            "Detected: January 15th, 7:00 AM EST\n"
+            "\n"
+            "New: Computer Vision Intern (Perception)\n"
+            "\n"
+            "Sent by your internship monitor"
+        )
+        assert body == expected
+
+    def test_email_subject_matches_push_title(
+        self, manager: AlertManager, sample_payload: AlertPayload
+    ) -> None:
+        assert (
+            manager._email_subject(sample_payload)
+            == "Skydio - Computer Vision Intern - Perception"
+        )
+
+    def test_email_subject_high_tier_prefix(
+        self, manager: AlertManager, sample_payload: AlertPayload
+    ) -> None:
+        payload = replace(sample_payload, tier="high")
+        assert (
+            manager._email_subject(payload)
+            == "HIGH: Skydio - Computer Vision Intern - Perception"
+        )
+
+    def test_email_body_omits_priority_score_when_zero(
+        self, manager: AlertManager, sample_payload: AlertPayload
+    ) -> None:
+        payload = replace(sample_payload, relevance_score=0)
+        body = manager._email_body(payload)
+        assert "Priority score" not in body
+        assert "Tier: standard" in body
+
+    @patch("monitor.alerts.smtplib.SMTP")
+    def test_send_email_uses_structured_subject_and_body(
+        self,
+        mock_smtp,
+        manager: AlertManager,
+        sample_payload: AlertPayload,
+    ) -> None:
+        smtp_instance = mock_smtp.return_value.__enter__.return_value
+
+        assert manager.send_email(sample_payload) is True
+
+        smtp_instance.sendmail.assert_called_once()
+        _, _, raw_message = smtp_instance.sendmail.call_args[0]
+        message = message_from_string(raw_message)
+        subject = message["Subject"]
+        body = message.get_payload(decode=True).decode("utf-8")
+        assert subject == "Skydio - Computer Vision Intern - Perception"
+        assert "Keywords detected: intern, summer 2027, Python, OpenCV" in body
+        assert "Application: https://boards.greenhouse.io/skydio/jobs/123" in body
+        assert "Priority score: 11" in body
+        assert "Tier: standard" in body
+        assert "Detected: January 15th, 7:00 AM EST" in body
+        assert "Keyword: intern" not in body
 
 
 class TestFireTierRouting:

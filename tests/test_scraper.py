@@ -298,6 +298,88 @@ class TestPollCompany:
         assert state.alert_count == 0
 
 
+LEVER_HTML_PAGE = """
+<html><body>
+  <div class="posting" data-qa-posting-id="lever-1">
+    <a href="https://jobs.lever.co/palantir/lever-1" class="posting-title">
+      <h5>Software Engineering Intern - Summer 2027</h5>
+    </a>
+    <div class="posting-categories">
+      <span>Engineering</span>
+      <span>Denver, CO</span>
+      <span>Internship</span>
+    </div>
+    <div class="posting-description">
+      Build services with Python and FastAPI for perception pipelines.
+    </div>
+  </div>
+</body></html>
+"""
+
+
+class TestPollHtmlJobs:
+    @pytest.fixture
+    def lever_company(self) -> CompanyConfig:
+        return CompanyConfig(
+            name="Palantir",
+            url="https://jobs.lever.co/palantir?commitment=Internship",
+            keywords=["intern", "summer 2027", "internship"],
+            enabled=True,
+        )
+
+    @pytest.fixture
+    def profiled_scraper(self) -> CareerPageScraper:
+        return CareerPageScraper(_test_settings(), load_profile())
+
+    def test_first_poll_seeds_html_job_ids(
+        self,
+        profiled_scraper: CareerPageScraper,
+        lever_company: CompanyConfig,
+    ) -> None:
+        state = StateRecord(
+            company="Palantir",
+            url=lever_company.url,
+            last_hash="",
+            last_checked="",
+            last_alerted=None,
+            alert_count=0,
+        )
+
+        with patch.object(profiled_scraper, "fetch", return_value=LEVER_HTML_PAGE):
+            result = profiled_scraper.poll_company(lever_company, state)
+
+        assert result == []
+        assert json.loads(state.seen_job_ids) == ["lever-1"]
+
+    def test_new_html_job_emits_notification_keywords(
+        self,
+        profiled_scraper: CareerPageScraper,
+        lever_company: CompanyConfig,
+    ) -> None:
+        state = StateRecord(
+            company="Palantir",
+            url=lever_company.url,
+            last_hash="seeded",
+            last_checked="",
+            last_alerted=(
+                datetime.now(timezone.utc) - timedelta(seconds=7200)
+            ).isoformat(),
+            alert_count=0,
+            seen_job_ids='["old-id"]',
+        )
+
+        with patch.object(profiled_scraper, "fetch", return_value=LEVER_HTML_PAGE):
+            result = profiled_scraper.poll_company(lever_company, state)
+
+        assert len(result) == 1
+        payload = result[0]
+        assert payload.job_title == "Software Engineering Intern - Summer 2027"
+        assert payload.trigger_keyword in {"intern", "summer 2027", "internship"}
+        assert payload.notification_keywords
+        lowered = {term.lower() for term in payload.notification_keywords}
+        assert "python" in lowered or "fastapi" in lowered
+
+
 GREENHOUSE_BOARD_JSON = json.dumps(
     {
         "jobs": [

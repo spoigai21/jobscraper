@@ -187,6 +187,7 @@ def test_alerts() -> None:
             "CLI test alert — no action required. "
             "This confirms all notification channels are wired correctly."
         ),
+        notification_keywords=("intern", "summer 2027", "python", "fastapi"),
     )
 
     click.echo("Sending high-tier test alert to all channels...")

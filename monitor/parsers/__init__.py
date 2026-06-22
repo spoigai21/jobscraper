@@ -20,6 +20,7 @@ from monitor.parsers.meta import (
     is_meta_company,
     is_meta_jobs_url,
 )
+from monitor.parsers.html import parse_html_jobs
 from monitor.parsers.nasa import (
     is_nasa_company,
     nasa_jobs_to_text,
@@ -47,6 +48,7 @@ __all__ = [
     "nasa_jobs_to_text",
     "parse_ashby",
     "parse_greenhouse",
+    "parse_html_jobs",
     "parse_job_board",
     "parse_lever",
     "parse_meta",
