@@ -168,7 +168,12 @@ def alerts(limit: int) -> None:
 
 
 @cli.command("test-alerts")
-def test_alerts() -> None:
+@click.option(
+    "--push-only",
+    is_flag=True,
+    help="Send a test push notification only (no email, SMS, or call).",
+)
+def test_alerts(push_only: bool) -> None:
     """Send a test alert through all notification channels."""
     setup_logging()
     settings = get_settings()
@@ -189,6 +194,14 @@ def test_alerts() -> None:
         ),
         notification_keywords=("intern", "summer 2027", "python", "fastapi"),
     )
+
+    if push_only:
+        click.echo("Sending test push notification only...")
+        ok = alert_manager.send_push(payload)
+        click.echo(f"  {'ok' if ok else 'FAIL'} PUSH")
+        if not ok:
+            click.echo("Push failed — verify NTFY_TOPIC in .env and run again.")
+        return
 
     click.echo("Sending high-tier test alert to all channels...")
     results = alert_manager.fire(payload)

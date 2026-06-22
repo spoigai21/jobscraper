@@ -194,10 +194,7 @@ class AlertManager:
         return f"{company} - {role}"
 
     def _push_title(self, payload: AlertPayload) -> str:
-        headline = self._push_role_line(payload)
-        if payload.tier == "high":
-            return f"HIGH: {headline}"
-        return headline
+        return self._push_role_line(payload)
 
     def _push_body(self, payload: AlertPayload) -> str:
         keywords = payload.notification_keywords
@@ -206,7 +203,7 @@ class AlertManager:
         keyword_text = ", ".join(keywords)
         apply_url = self._apply_url(payload)
 
-        lines = [self._push_role_line(payload)]
+        lines: list[str] = []
         if keyword_text:
             lines.append(f"Keywords detected: {keyword_text}")
         lines.append(f"Application: {apply_url}")

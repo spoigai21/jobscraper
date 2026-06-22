@@ -71,7 +71,6 @@ class TestPushNotificationContent:
     def test_push_body_format(self, manager: AlertManager, sample_payload: AlertPayload) -> None:
         body = manager._push_body(sample_payload)
         expected = (
-            "Skydio - Computer Vision Intern - Perception\n"
             "Keywords detected: intern, summer 2027, Python, OpenCV\n"
             "Application: https://boards.greenhouse.io/skydio/jobs/123"
         )
@@ -83,11 +82,11 @@ class TestPushNotificationContent:
             == "Skydio - Computer Vision Intern - Perception"
         )
 
-    def test_push_title_high_tier_prefix(self, manager: AlertManager, sample_payload: AlertPayload) -> None:
+    def test_push_title_high_tier_no_prefix(self, manager: AlertManager, sample_payload: AlertPayload) -> None:
         payload = replace(sample_payload, tier="high")
         assert (
             manager._push_title(payload)
-            == "HIGH: Skydio - Computer Vision Intern - Perception"
+            == "Skydio - Computer Vision Intern - Perception"
         )
 
     @pytest.mark.parametrize(
@@ -143,8 +142,8 @@ class TestPushNotificationContent:
             notification_keywords=("internship", "undergrad"),
         )
         body = manager._push_body(payload)
-        assert body.startswith("Skydio - Software Engineering Intern")
-        assert "Keywords detected: internship, undergrad" in body
+        assert body.startswith("Keywords detected: internship, undergrad")
+        assert manager._push_title(payload) == "Skydio - Software Engineering Intern"
         assert "Application: https://example.com/careers" in body
 
     @patch("monitor.alerts.requests.post")
@@ -201,13 +200,13 @@ class TestEmailNotificationContent:
             == "Skydio - Computer Vision Intern - Perception"
         )
 
-    def test_email_subject_high_tier_prefix(
+    def test_email_subject_high_tier_no_prefix(
         self, manager: AlertManager, sample_payload: AlertPayload
     ) -> None:
         payload = replace(sample_payload, tier="high")
         assert (
             manager._email_subject(payload)
-            == "HIGH: Skydio - Computer Vision Intern - Perception"
+            == "Skydio - Computer Vision Intern - Perception"
         )
 
     def test_email_body_omits_priority_score_when_zero(
