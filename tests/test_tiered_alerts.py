@@ -231,6 +231,7 @@ class TestEmailNotificationContent:
         assert call_kwargs["headers"]["Authorization"] == "Bearer tk_test_token"
         assert call_kwargs["headers"]["Email"] == "test@example.com"
         assert call_kwargs["headers"]["Title"] == "Skydio - Computer Vision Intern - Perception"
+        assert mock_post.call_args.args[0] == "https://ntfy.sh/test-topic-email"
         body = call_kwargs["data"].decode("utf-8")
         assert "Keywords detected: intern, summer 2027, Python, OpenCV" in body
         assert "Application: https://boards.greenhouse.io/skydio/jobs/123" in body
@@ -246,19 +247,15 @@ class TestFireTierRouting:
         payload = replace(sample_payload, tier="standard")
 
         with (
-            patch.object(
-                manager, "send_push_and_email_ntfy", return_value=(True, True)
-            ) as combined,
-            patch.object(manager, "send_push") as push,
+            patch.object(manager, "send_push", return_value=True) as push,
             patch.object(manager, "send_sms") as sms,
             patch.object(manager, "send_voice_call") as call,
-            patch.object(manager, "send_email") as email,
+            patch.object(manager, "send_email", return_value=True) as email,
         ):
             results = manager.fire(payload)
 
-        combined.assert_called_once_with(payload)
-        push.assert_not_called()
-        email.assert_not_called()
+        push.assert_called_once_with(payload)
+        email.assert_called_once_with(payload)
         sms.assert_not_called()
         call.assert_not_called()
         assert results == {
@@ -268,27 +265,8 @@ class TestFireTierRouting:
             "email": True,
         }
 
-    def test_standard_tier_without_ntfy_token_uses_separate_channels(
-        self, sample_payload: AlertPayload
-    ) -> None:
-        manager = AlertManager(_test_settings(ntfy_token=""), load_profile())
-        payload = replace(sample_payload, tier="standard")
-
-        with (
-            patch.object(manager, "send_push", return_value=True) as push,
-            patch.object(manager, "send_email", return_value=True) as email,
-            patch.object(manager, "send_push_and_email_ntfy") as combined,
-        ):
-            results = manager.fire(payload)
-
-        push.assert_called_once_with(payload)
-        email.assert_called_once_with(payload)
-        combined.assert_not_called()
-        assert results["push"] is True
-        assert results["email"] is True
-
     @patch("monitor.alerts.requests.post")
-    def test_combined_ntfy_sends_one_request(
+    def test_push_and_email_use_different_ntfy_topics(
         self,
         mock_post,
         manager: AlertManager,
@@ -296,14 +274,20 @@ class TestFireTierRouting:
     ) -> None:
         mock_post.return_value.ok = True
 
-        push_ok, email_ok = manager.send_push_and_email_ntfy(sample_payload)
+        assert manager.send_push(sample_payload) is True
+        assert manager.send_email(sample_payload) is True
 
-        assert push_ok is True
-        assert email_ok is True
-        mock_post.assert_called_once()
-        headers = mock_post.call_args.kwargs["headers"]
-        assert headers["Email"] == "test@example.com"
-        assert headers["Authorization"] == "Bearer tk_test_token"
+        assert mock_post.call_count == 2
+        push_url = mock_post.call_args_list[0].args[0]
+        email_url = mock_post.call_args_list[1].args[0]
+        assert push_url == "https://ntfy.sh/test-topic"
+        assert email_url == "https://ntfy.sh/test-topic-email"
+        assert "Email" not in mock_post.call_args_list[0].kwargs["headers"]
+        assert mock_post.call_args_list[1].kwargs["headers"]["Email"] == "test@example.com"
+        push_body = mock_post.call_args_list[0].kwargs["data"].decode("utf-8")
+        email_body = mock_post.call_args_list[1].kwargs["data"].decode("utf-8")
+        assert "Tier:" not in push_body
+        assert "Tier: standard" in email_body
 
     def test_high_tier_sends_all_channels(
         self, manager: AlertManager, sample_payload: AlertPayload
@@ -311,21 +295,17 @@ class TestFireTierRouting:
         payload = replace(sample_payload, tier="high")
 
         with (
-            patch.object(
-                manager, "send_push_and_email_ntfy", return_value=(True, True)
-            ) as combined,
-            patch.object(manager, "send_push") as push,
+            patch.object(manager, "send_push", return_value=True) as push,
             patch.object(manager, "send_sms", return_value=True) as sms,
             patch.object(manager, "send_voice_call", return_value=True) as call,
-            patch.object(manager, "send_email") as email,
+            patch.object(manager, "send_email", return_value=True) as email,
         ):
             results = manager.fire(payload)
 
-        combined.assert_called_once_with(payload)
-        push.assert_not_called()
-        email.assert_not_called()
+        push.assert_called_once_with(payload)
         sms.assert_called_once_with(payload)
         call.assert_called_once_with(payload)
+        email.assert_called_once_with(payload)
         assert results == {
             "sms": True,
             "call": True,
@@ -339,11 +319,10 @@ class TestFireTierRouting:
         payload = replace(sample_payload, tier="high")
 
         with (
-            patch.object(
-                manager, "send_push_and_email_ntfy", return_value=(True, False)
-            ),
+            patch.object(manager, "send_push", return_value=True),
             patch.object(manager, "send_sms", return_value=False),
             patch.object(manager, "send_voice_call", return_value=True),
+            patch.object(manager, "send_email", return_value=False),
         ):
             results = manager.fire(payload)
 

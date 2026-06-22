@@ -231,17 +231,9 @@ class AlertManager:
         lines.extend(["", "Sent by your internship monitor"])
         return "\n".join(lines)
 
-    def _uses_ntfy_email(self) -> bool:
-        return bool(
-            self._settings.ntfy_topic
-            and self._settings.alert_email_to
-            and self._settings.ntfy_token
-        )
-
-    def _can_combine_ntfy_push_and_email(
-        self, active: tuple[AlertChannel, ...]
-    ) -> bool:
-        return "push" in active and "email" in active and self._uses_ntfy_email()
+    def _ntfy_email_topic(self) -> str:
+        """Topic for email-only posts; do not subscribe to this on your phone."""
+        return f"{self._settings.ntfy_topic}-email"
 
     def _post_ntfy(
         self,
@@ -249,6 +241,7 @@ class AlertManager:
         *,
         body: str,
         include_email: bool,
+        topic: str | None = None,
     ) -> bool:
         if not self._settings.ntfy_topic:
             logger.error("ntfy skipped: NTFY_TOPIC is not configured")
@@ -275,7 +268,8 @@ class AlertManager:
             headers["Email"] = self._settings.alert_email_to
             headers["Authorization"] = f"Bearer {self._settings.ntfy_token}"
 
-        url = f"{NTFY_BASE_URL}/{self._settings.ntfy_topic}"
+        publish_topic = topic or self._settings.ntfy_topic
+        url = f"{NTFY_BASE_URL}/{publish_topic}"
         try:
             response = requests.post(
                 url,
@@ -296,17 +290,6 @@ class AlertManager:
             logger.exception("Failed ntfy request for %s", payload.company)
             return False
 
-    def send_push_and_email_ntfy(self, payload: AlertPayload) -> tuple[bool, bool]:
-        """One ntfy POST delivers both push and email (avoids duplicate notifications)."""
-        ok = self._post_ntfy(
-            payload,
-            body=self._email_body(payload),
-            include_email=True,
-        )
-        if ok:
-            logger.info("Push and email sent for %s via ntfy", payload.company)
-        return ok, ok
-
     def send_push(self, payload: AlertPayload) -> bool:
         if not self._settings.ntfy_topic:
             logger.error("Push skipped: NTFY_TOPIC is not configured")
@@ -322,7 +305,12 @@ class AlertManager:
         return ok
 
     def _send_email_ntfy(self, payload: AlertPayload, body: str) -> bool:
-        ok = self._post_ntfy(payload, body=body, include_email=True)
+        ok = self._post_ntfy(
+            payload,
+            body=body,
+            include_email=True,
+            topic=self._ntfy_email_topic(),
+        )
         if ok:
             logger.info("Email sent for %s via ntfy", payload.company)
         return ok
@@ -346,11 +334,10 @@ class AlertManager:
         }
         handlers = self._channel_handlers()
         active = self._channels_for_tier(payload.tier)
-        combine_ntfy = self._can_combine_ntfy_push_and_email(active)
         tasks = {
             name: handlers[name]
             for name in active
-            if name in handlers and not (combine_ntfy and name in ("push", "email"))
+            if name in handlers
         }
 
         with ThreadPoolExecutor(max_workers=max(len(tasks), 1)) as executor:
@@ -368,12 +355,7 @@ class AlertManager:
                     )
                     channels[name] = False
 
-        if combine_ntfy:
-            push_ok, email_ok = self.send_push_and_email_ntfy(payload)
-            channels["push"] = push_ok
-            channels["email"] = email_ok
-
-        attempted = set(active)
+        attempted = set(tasks)
         ok = [n for n in attempted if channels[n]]
         bad = [n for n in attempted if not channels[n]]
         if ok:

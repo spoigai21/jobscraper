@@ -46,6 +46,7 @@ Email is delivered through **ntfy** (same service as push).
 2. Create a free account at [ntfy.sh/account](https://ntfy.sh/account) and **verify that email address**.
 3. On the same Account page, create an **access token** and set `NTFY_TOKEN` in `.env` / Railway variables (starts with `tk_`).
 4. Keep `NTFY_TOPIC` set — email uses the same topic as push. Push works without a token; email requires one.
+5. Do **not** subscribe to the `{NTFY_TOPIC}-email` topic on your phone. Email posts go there so they won't trigger a second push notification.
 
 Note: ntfy free tier limits email to **5 per day**. Push notifications are not subject to that cap.
 
