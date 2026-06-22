@@ -9,7 +9,9 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from monitor.models import JobPosting
+from monitor.parsers.bytedance import is_bytedance_jobs_url, parse_bytedance
 from monitor.parsers.meta import is_meta_jobs_url, parse_meta
+from monitor.parsers.tiktok import is_tiktok_jobs_url, parse_tiktok
 
 __all__ = [
     "BoardType",
@@ -19,11 +21,13 @@ __all__ = [
     "job_matches_keyword",
     "jobs_to_text",
     "parse_ashby",
+    "parse_bytedance",
     "parse_greenhouse",
     "parse_job_board",
     "parse_lever",
     "parse_meta",
     "parse_microsoft",
+    "parse_tiktok",
     "parse_uber",
     "parse_workday",
 ]
@@ -37,6 +41,8 @@ class BoardType(str, Enum):
     UBER = "uber"
     MICROSOFT = "microsoft"
     META = "meta"
+    BYTEDANCE = "bytedance"
+    TIKTOK = "tiktok"
     HTML = "html"
     UNKNOWN = "unknown"
 
@@ -105,7 +111,7 @@ def detect_board_type(url: str) -> BoardType:
         return BoardType.GREENHOUSE
     if "api.ashbyhq.com/posting-api" in lowered:
         return BoardType.ASHBY
-    if "api.lever.co/v0/postings" in lowered:
+    if "lever.co/v0/postings" in lowered:
         return BoardType.LEVER
     if "/wday/cxs/" in lowered:
         return BoardType.WORKDAY
@@ -115,6 +121,10 @@ def detect_board_type(url: str) -> BoardType:
         return BoardType.MICROSOFT
     if is_meta_jobs_url(url):
         return BoardType.META
+    if is_bytedance_jobs_url(url):
+        return BoardType.BYTEDANCE
+    if is_tiktok_jobs_url(url):
+        return BoardType.TIKTOK
     if url.startswith(("http://", "https://")):
         return BoardType.HTML
     return BoardType.UNKNOWN
@@ -412,6 +422,10 @@ def parse_job_board(
         return parse_microsoft(raw_json, company_name, board_url=url)
     if board_type == BoardType.META:
         return parse_meta(raw_json, company_name)
+    if board_type == BoardType.BYTEDANCE:
+        return parse_bytedance(raw_json, company_name)
+    if board_type == BoardType.TIKTOK:
+        return parse_tiktok(raw_json, company_name)
     return []
 
 

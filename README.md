@@ -165,14 +165,29 @@ Optional tuning variables (`POLL_INTERVAL_BUSINESS`, `POLL_INTERVAL_OVERNIGHT`, 
 
 By default Railway uses an ephemeral filesystem — `monitor.db` is reset on every redeploy, which re-seeds all companies and can miss listings that appeared during downtime.
 
-1. In the Railway dashboard, add a **Volume** to your service (e.g. mount path `/data`).
-2. Set the database path:
+**Dashboard:** Volumes are not under Service Settings. In your project canvas, press **Cmd+K** (Mac) or **Ctrl+K** (Windows/Linux), search **New Volume**, and attach it to your worker service with mount path `/data`. You can also right-click empty canvas space to create one. See [Railway Volumes docs](https://docs.railway.com/volumes).
+
+**CLI:**
+
+```bash
+railway volume add --mount-path /data
+```
+
+Then set the database path:
 
 ```bash
 railway variables set MONITOR_DB_PATH=/data/monitor.db
 ```
 
-Poll state (`seen_job_ids`, cooldown timestamps) and alert history then survive redeploys.
+Poll state (`seen_job_ids`, cooldown timestamps) and alert history then survive redeploys. Free tier includes one 0.5 GB volume — plenty for SQLite.
+
+After the first poll, confirm the file exists (Railway service shell or `railway volume browse /`):
+
+```bash
+ls -la /data/monitor.db
+```
+
+If SQLite writes fail with permission errors, set `RAILWAY_RUN_UID=0`.
 
 ### 5. Deploy
 

@@ -113,10 +113,10 @@ COMPANIES: list[CompanyConfig] = [
         enabled=True,
     ),
     CompanyConfig(
-        name="Cruise",
-        url="https://getcruise.com/careers/jobs/",
-        keywords=DEFAULT_KEYWORDS,
-        enabled=False,  # GM wound down Cruise robotaxi; careers redirect to GM marketing
+        name="Zipline",
+        url="https://boards-api.greenhouse.io/v1/boards/flyzipline/jobs?content=true",
+        keywords=FILTERED_INTERN_KEYWORDS,
+        enabled=True,
     ),
     CompanyConfig(
         name="Luminar",
@@ -124,12 +124,7 @@ COMPANIES: list[CompanyConfig] = [
         keywords=DEFAULT_KEYWORDS,
         enabled=False,  # /careers/ redirects to a broken page; site is product marketing only
     ),
-    CompanyConfig(
-        name="Matterport",
-        url="https://matterport.com/careers",
-        keywords=DEFAULT_KEYWORDS,
-        enabled=False,  # Redirects to CoStar Group portal — noisy, not Matterport-specific
-    ),
+    # REMOVED — Matterport: redirects to CoStar Group portal — noisy, not Matterport-specific
     CompanyConfig(
         name="SpaceX",
         url="https://boards-api.greenhouse.io/v1/boards/spacex/jobs?content=true",
@@ -331,10 +326,28 @@ COMPANIES: list[CompanyConfig] = [
         enabled=True,
     ),
     CompanyConfig(
+        name="Snap",
+        url=(
+            "https://wd1.myworkdaysite.com/wday/cxs/snapchat/snap/jobs"
+            "?searchText=software engineering intern"
+        ),
+        keywords=FILTERED_INTERN_KEYWORDS,
+        enabled=True,
+    ),
+    CompanyConfig(
         name="Reddit",
         url="https://boards-api.greenhouse.io/v1/boards/reddit/jobs?content=true",
         keywords=FILTERED_INTERN_KEYWORDS,
         enabled=True,
+    ),
+    CompanyConfig(
+        name="Adobe",
+        url=(
+            "https://adobe.wd5.myworkdayjobs.com/wday/cxs/adobe/external_experienced/jobs"
+            "?searchText=internship"
+        ),
+        keywords=FILTERED_INTERN_KEYWORDS,
+        enabled=True,  # Workday cxs API; careers.adobe.com is Phenom SPA front-end
     ),
     CompanyConfig(
         name="Airbnb",
@@ -349,14 +362,17 @@ COMPANIES: list[CompanyConfig] = [
         enabled=True,
     ),
     CompanyConfig(
-        name="Instacart",
-        url="https://boards-api.greenhouse.io/v1/boards/instacart/jobs?content=true",
+        name="ByteDance",
+        url=(
+            "https://jobs.bytedance.com/api/v1/search/job/posts"
+            "?keyword=intern&portal_type=2"
+        ),
         keywords=FILTERED_INTERN_KEYWORDS,
-        enabled=True,
+        enabled=True,  # ATSX CSRF POST API (joinbytedance.com careers search)
     ),
     CompanyConfig(
-        name="Anduril",
-        url="https://boards-api.greenhouse.io/v1/boards/andurilindustries/jobs?content=true",
+        name="Instacart",
+        url="https://boards-api.greenhouse.io/v1/boards/instacart/jobs?content=true",
         keywords=FILTERED_INTERN_KEYWORDS,
         enabled=True,
     ),
@@ -365,6 +381,12 @@ COMPANIES: list[CompanyConfig] = [
         url="https://boards-api.greenhouse.io/v1/boards/aurorainnovation/jobs?content=true",
         keywords=FILTERED_INTERN_KEYWORDS,
         enabled=True,
+    ),
+    CompanyConfig(
+        name="Mobileye",
+        url="https://api.eu.lever.co/v0/postings/mobileye",
+        keywords=FILTERED_INTERN_KEYWORDS,
+        enabled=True,  # Lever EU API; US api.lever.co 404; commitment filter returns []
     ),
     CompanyConfig(
         name="Applied Intuition",
@@ -407,5 +429,14 @@ COMPANIES: list[CompanyConfig] = [
         url="https://www.tesla.com/careers/search/?type=3&query=intern",
         keywords=STRICT_INTERN_KEYWORDS,
         enabled=False,  # Akamai Bot Manager blocks datacenter fetches (403/429/challenge)
+    ),
+    CompanyConfig(
+        name="TikTok",
+        url=(
+            "https://api.lifeattiktok.com/api/v1/public/supplier/search/job/posts"
+            "?keywords=intern"
+        ),
+        keywords=FILTERED_INTERN_KEYWORDS,
+        enabled=True,  # ATSX supplier POST API (lifeattiktok.com careers search)
     ),
 ]

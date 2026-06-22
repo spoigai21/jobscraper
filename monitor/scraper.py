@@ -22,6 +22,8 @@ from monitor.parsers.boards import (
     jobs_to_text,
     parse_job_board,
 )
+from monitor.parsers.bytedance import fetch_bytedance_search_raw, is_bytedance_jobs_url
+from monitor.parsers.tiktok import fetch_tiktok_search_raw, is_tiktok_jobs_url
 from monitor.parsers.html import parse_html_jobs
 from monitor.parsers.meta import fetch_meta_search_raw, is_meta_jobs_url
 from monitor.parsers.nasa import is_nasa_company, nasa_jobs_to_text, parse_nasa_html
@@ -147,6 +149,8 @@ class CareerPageScraper:
             BoardType.WORKDAY,
             BoardType.MICROSOFT,
             BoardType.META,
+            BoardType.BYTEDANCE,
+            BoardType.TIKTOK,
         )
 
     @staticmethod
@@ -171,10 +175,12 @@ class CareerPageScraper:
             for marker in (
                 "boards-api.greenhouse.io",
                 "api.ashbyhq.com/posting-api",
-                "api.lever.co/v0/postings",
+                "lever.co/v0/postings",
                 "/wday/cxs/",
                 "uber.com/api/loadsearchjobsresults",
                 "/api/pcsx/search",
+                "jobs.bytedance.com/api/v1/search/job/posts",
+                "api.lifeattiktok.com",
             )
         )
 
@@ -389,7 +395,7 @@ class CareerPageScraper:
                 for dept in job.get("departments") or []:
                     if isinstance(dept, dict):
                         parts.append(str(dept.get("name", "")))
-        elif "api.lever.co/v0/postings" in lowered_url:
+        elif "lever.co/v0/postings" in lowered_url:
             for job in data if isinstance(data, list) else []:
                 parts.append(str(job.get("text", "")))
                 categories = job.get("categories") or {}
@@ -405,6 +411,12 @@ class CareerPageScraper:
             jobs = parse_job_board(raw, url, "")
             return jobs_to_text(jobs)
         elif is_meta_jobs_url(url):
+            jobs = parse_job_board(raw, url, "")
+            return jobs_to_text(jobs)
+        elif is_bytedance_jobs_url(url):
+            jobs = parse_job_board(raw, url, "")
+            return jobs_to_text(jobs)
+        elif is_tiktok_jobs_url(url):
             jobs = parse_job_board(raw, url, "")
             return jobs_to_text(jobs)
 
@@ -437,6 +449,18 @@ class CareerPageScraper:
                     return self._fetch_microsoft(url, headers)
                 if is_meta_jobs_url(url):
                     return fetch_meta_search_raw(
+                        url,
+                        user_agent=self._settings.user_agent,
+                        timeout=self._settings.request_timeout,
+                    )
+                if is_bytedance_jobs_url(url):
+                    return fetch_bytedance_search_raw(
+                        url,
+                        user_agent=self._settings.user_agent,
+                        timeout=self._settings.request_timeout,
+                    )
+                if is_tiktok_jobs_url(url):
+                    return fetch_tiktok_search_raw(
                         url,
                         user_agent=self._settings.user_agent,
                         timeout=self._settings.request_timeout,

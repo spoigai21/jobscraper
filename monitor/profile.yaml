@@ -165,6 +165,8 @@ prestige:
     - SpaceX
   tier_b:
     - Zoox
+    - Mobileye
+    - Zipline
     - Skydio
     - Nuro
     - Rocket Lab

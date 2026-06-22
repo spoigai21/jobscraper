@@ -14,6 +14,7 @@ from monitor.parsers.boards import (
     job_matches_keyword,
     jobs_to_text,
     parse_ashby,
+    parse_bytedance,
     parse_greenhouse,
     parse_job_board,
     parse_lever,
@@ -56,6 +57,14 @@ class TestDetectBoardType:
             (
                 "https://www.metacareers.com/jobsearch?q=intern",
                 BoardType.META,
+            ),
+            (
+                "https://jobs.bytedance.com/api/v1/search/job/posts?keyword=intern&portal_type=2",
+                BoardType.BYTEDANCE,
+            ),
+            (
+                "https://api.lifeattiktok.com/api/v1/public/supplier/search/job/posts?keywords=intern",
+                BoardType.TIKTOK,
             ),
             ("https://careers.google.com/jobs", BoardType.HTML),
         ],
@@ -178,6 +187,57 @@ class TestParseUber:
         jobs = parse_job_board(raw, url, "Uber")
         assert len(jobs) == 1
         assert jobs[0].title == "Software Engineering Intern"
+
+
+class TestParseByteDance:
+    def test_parses_live_api_shape(self) -> None:
+        raw = {
+            "data": {
+                "job_post_list": [
+                    {
+                        "id": "7604788487364544821",
+                        "title": "Software Engineer Intern, Backend",
+                        "description": "Build backend services for TikTok.",
+                        "requirement": "Pursuing a BS in Computer Science.",
+                        "job_category": {"en_name": "Engineering"},
+                        "city_info": {"en_name": "San Jose"},
+                    }
+                ]
+            }
+        }
+        jobs = parse_bytedance(raw, "ByteDance")
+
+        assert len(jobs) == 1
+        job = jobs[0]
+        assert job.id == "7604788487364544821"
+        assert job.title == "Software Engineer Intern, Backend"
+        assert job.department == "Engineering"
+        assert job.location == "San Jose"
+        assert "TikTok" in job.description
+        assert job.url == "https://joinbytedance.com/search/7604788487364544821"
+        assert job.company_name == "ByteDance"
+
+    def test_routes_to_bytedance_parser(self) -> None:
+        raw = {
+            "data": {
+                "job_post_list": [
+                    {
+                        "id": "123",
+                        "title": "Machine Learning Intern",
+                        "description": "Train models.",
+                        "job_category": {"en_name": "Research"},
+                        "city_info": {"en_name": "Seattle"},
+                    }
+                ]
+            }
+        }
+        url = (
+            "https://jobs.bytedance.com/api/v1/search/job/posts"
+            "?keyword=intern&portal_type=2"
+        )
+        jobs = parse_job_board(raw, url, "ByteDance")
+        assert len(jobs) == 1
+        assert jobs[0].title == "Machine Learning Intern"
 
 
 class TestParseMicrosoft:

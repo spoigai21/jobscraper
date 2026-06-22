@@ -44,3 +44,76 @@ class TestZooxBoard:
         )
         assert detect_board_type(company.url) == BoardType.LEVER
         assert company.enabled is True
+
+
+class TestMobileyeBoard:
+    def test_uses_lever_eu_api(self) -> None:
+        company = _company("Mobileye")
+
+        assert company.url == "https://api.eu.lever.co/v0/postings/mobileye"
+        assert detect_board_type(company.url) == BoardType.LEVER
+        assert company.enabled is True
+
+
+class TestByteDanceBoard:
+    def test_uses_atsx_api(self) -> None:
+        company = _company("ByteDance")
+
+        assert (
+            company.url
+            == "https://jobs.bytedance.com/api/v1/search/job/posts"
+            "?keyword=intern&portal_type=2"
+        )
+        assert detect_board_type(company.url) == BoardType.BYTEDANCE
+        assert company.enabled is True
+
+
+class TestZiplineBoard:
+    def test_uses_greenhouse_api(self) -> None:
+        company = _company("Zipline")
+
+        assert (
+            company.url
+            == "https://boards-api.greenhouse.io/v1/boards/flyzipline/jobs?content=true"
+        )
+        assert detect_board_type(company.url) == BoardType.GREENHOUSE
+        assert company.enabled is True
+
+
+class TestSnapBoard:
+    def test_uses_workday_api(self) -> None:
+        company = _company("Snap")
+
+        assert (
+            company.url
+            == "https://wd1.myworkdaysite.com/wday/cxs/snapchat/snap/jobs"
+            "?searchText=software engineering intern"
+        )
+        assert detect_board_type(company.url) == BoardType.WORKDAY
+        assert company.enabled is True
+
+
+class TestAdobeBoard:
+    def test_uses_workday_api(self) -> None:
+        company = _company("Adobe")
+
+        assert (
+            company.url
+            == "https://adobe.wd5.myworkdayjobs.com/wday/cxs/adobe/external_experienced/jobs"
+            "?searchText=internship"
+        )
+        assert detect_board_type(company.url) == BoardType.WORKDAY
+        assert company.enabled is True
+
+
+class TestTikTokBoard:
+    def test_uses_atsx_supplier_api(self) -> None:
+        company = _company("TikTok")
+
+        assert (
+            company.url
+            == "https://api.lifeattiktok.com/api/v1/public/supplier/search/job/posts"
+            "?keywords=intern"
+        )
+        assert detect_board_type(company.url) == BoardType.TIKTOK
+        assert company.enabled is True
