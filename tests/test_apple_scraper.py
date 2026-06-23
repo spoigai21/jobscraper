@@ -144,13 +144,29 @@ class TestFetchAppleSearchRaw:
         _sleep.assert_called_once()
 
     @patch("monitor.parsers.apple.time.sleep")
-    def test_stops_when_page_is_shorter_than_page_size(self, _sleep: MagicMock) -> None:
-        mock_response = MagicMock()
-        mock_response.text = _SAMPLE_HTML
-        mock_response.raise_for_status = MagicMock()
+    def test_continues_when_short_page_but_total_records_remain(self, _sleep: MagicMock) -> None:
+        short_page_jobs = [
+            _minimal_apple_job(f"20066659{index}", f"Intern Role {index}")
+            for index in range(3)
+        ]
+        page_one = MagicMock()
+        page_one.text = _apple_hydration_html(84, short_page_jobs)
+        page_one.raise_for_status = MagicMock()
+
+        page_two_jobs = [
+            _minimal_apple_job(f"20063229{index}", f"Hardware Intern {index}")
+            for index in range(20)
+        ]
+        page_two = MagicMock()
+        page_two.text = _apple_hydration_html(84, page_two_jobs)
+        page_two.raise_for_status = MagicMock()
+
+        page_three = MagicMock()
+        page_three.text = _apple_hydration_html(84, [])
+        page_three.raise_for_status = MagicMock()
 
         mock_session = MagicMock()
-        mock_session.get.return_value = mock_response
+        mock_session.get.side_effect = [page_one, page_two, page_three]
 
         with patch("monitor.parsers.apple.requests.Session", return_value=mock_session):
             raw = fetch_apple_search_raw(
@@ -161,8 +177,10 @@ class TestFetchAppleSearchRaw:
 
         assert raw is not None
         payload = json.loads(raw)
-        assert len(payload["searchResults"]) == 3
+        assert len(payload["searchResults"]) == 23
         assert payload["totalRecords"] == 84
-        assert mock_session.get.call_count == 1
-        assert "page=1" in mock_session.get.call_args.args[0]
-        _sleep.assert_not_called()
+        assert mock_session.get.call_count == 3
+        assert "page=1" in mock_session.get.call_args_list[0].args[0]
+        assert "page=2" in mock_session.get.call_args_list[1].args[0]
+        assert "page=3" in mock_session.get.call_args_list[2].args[0]
+        assert _sleep.call_count == 2

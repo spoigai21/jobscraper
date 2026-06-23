@@ -67,7 +67,7 @@ COMPANIES: list[CompanyConfig] = [
     CompanyConfig(
         name="Apple",
         url="https://jobs.apple.com/en-us/search?search=internship&sort=newest",
-        keywords=STRICT_INTERN_KEYWORDS,
+        keywords=FILTERED_INTERN_KEYWORDS,
         enabled=True,  # SSR hydration searchResults (paginated GET HTML)
     ),
     CompanyConfig(
@@ -195,7 +195,7 @@ COMPANIES: list[CompanyConfig] = [
         name="NVIDIA",
         url=(
             "https://nvidia.wd5.myworkdayjobs.com/wday/cxs/nvidia/NVIDIAExternalCareerSite/jobs"
-            "?searchText=intern"
+            "?searchText=software engineering intern"
         ),
         keywords=FILTERED_INTERN_KEYWORDS,
         enabled=True,  # Workday cxs API (jobs.nvidia.com Eightfold SPA is wrong layer)

@@ -78,6 +78,7 @@ def run_poll_cycle(
                         state.last_alerted = payload.detected_at
                         state.alert_count += 1
                         alerts_fired += 1
+                        store.upsert_state(state)
                         label = payload.job_title or payload.trigger_keyword
                         tier_tag = (
                             f" [{payload.tier}]" if payload.tier != "standard" else ""

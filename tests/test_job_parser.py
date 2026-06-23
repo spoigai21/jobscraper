@@ -444,6 +444,25 @@ class TestParseWorkday:
         assert intern_job.url.endswith("/Software-Engineering-Intern_JR123")
         assert intern_job.company_name == "Salesforce"
 
+    def test_workday_job_id_falls_back_to_external_path_basename(self) -> None:
+        raw = {
+            "jobPostings": [
+                {
+                    "title": "Software Engineering Intern",
+                    "externalPath": "/job/California/Software-Engineering-Intern_JR123",
+                    "locationsText": "California - San Francisco",
+                }
+            ]
+        }
+        url = (
+            "https://salesforce.wd12.myworkdayjobs.com/wday/cxs/salesforce/"
+            "External_Career_Site/jobs?searchText=internship"
+        )
+        jobs = parse_workday(raw, "Salesforce", board_url=url)
+
+        assert len(jobs) == 1
+        assert jobs[0].id == "Software-Engineering-Intern_JR123"
+
 
 class TestJobHelpers:
     def test_jobs_to_text_includes_titles_and_descriptions(

@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import requests
 
+from monitor.config import PAGE_FETCH_DELAY_SECONDS
 from monitor.models import JobPosting
 
 logger = logging.getLogger(__name__)
@@ -156,6 +158,8 @@ def fetch_amazon_search_raw(
             break
         if len(page_jobs) < MAX_RESULT_LIMIT:
             break
+
+        time.sleep(PAGE_FETCH_DELAY_SECONDS)
 
     if not all_jobs:
         return None

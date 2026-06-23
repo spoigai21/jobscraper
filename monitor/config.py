@@ -18,6 +18,9 @@ DEFAULT_USER_AGENT = (
     "Chrome/122.0.0.0 Safari/537.36"
 )
 
+# Polite delay between paginated API/page fetches.
+PAGE_FETCH_DELAY_SECONDS = 0.5
+
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 
 
@@ -36,6 +39,7 @@ class Settings:
     business_hours_end: int = 19
     request_timeout: int = 15
     min_alert_interval: int = 3600
+    max_alerts_per_company_per_cycle: int = 5
     user_agent: str = DEFAULT_USER_AGENT
     monitor_db_path: str = str(DEFAULT_DB_PATH)
 
@@ -63,6 +67,9 @@ def get_settings() -> Settings:
         business_hours_end=_env_int("BUSINESS_HOURS_END", 19),
         request_timeout=_env_int("REQUEST_TIMEOUT", 15),
         min_alert_interval=_env_int("MIN_ALERT_INTERVAL", 3600),
+        max_alerts_per_company_per_cycle=_env_int(
+            "MAX_ALERTS_PER_COMPANY_PER_CYCLE", 5
+        ),
         user_agent=os.getenv("USER_AGENT") or DEFAULT_USER_AGENT,
         monitor_db_path=os.getenv("MONITOR_DB_PATH") or str(DEFAULT_DB_PATH),
     )

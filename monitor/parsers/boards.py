@@ -12,7 +12,7 @@ from monitor.models import JobPosting
 from monitor.parsers.amazon import is_amazon_jobs_url, parse_amazon
 from monitor.parsers.apple import is_apple_jobs_url, parse_apple
 from monitor.parsers.bytedance import is_bytedance_jobs_url, parse_bytedance
-from monitor.parsers.google import is_google_careers_url, parse_google_html
+from monitor.parsers.google import is_google_careers_url, parse_google, parse_google_html
 from monitor.parsers.meta import is_meta_jobs_url, parse_meta
 from monitor.parsers.tiktok import is_tiktok_jobs_url, parse_tiktok
 
@@ -27,6 +27,7 @@ __all__ = [
     "parse_apple",
     "parse_ashby",
     "parse_bytedance",
+    "parse_google",
     "parse_google_html",
     "parse_greenhouse",
     "parse_job_board",
@@ -290,12 +291,22 @@ def _workday_public_base_url(board_url: str) -> str:
 
 
 def _workday_job_id(job: dict[str, Any]) -> str | None:
+    """Return a stable Workday job ID.
+
+    Prefer ``bulletFields[0]`` (requisition id, e.g. ``JR123``). When that is
+    missing, fall back to the ``externalPath`` basename so slug-only paths do
+    not churn IDs when the listing URL prefix changes.
+    """
     bullet_fields = job.get("bulletFields")
     if isinstance(bullet_fields, list) and bullet_fields:
-        return str(bullet_fields[0])
-    external_path = job.get("externalPath")
+        bullet_id = str(bullet_fields[0]).strip()
+        if bullet_id:
+            return bullet_id
+    external_path = str(job.get("externalPath") or "").strip()
     if external_path:
-        return str(external_path)
+        basename = external_path.rstrip("/").rsplit("/", 1)[-1]
+        if basename:
+            return basename
     return None
 
 
@@ -447,9 +458,7 @@ def parse_job_board(
     if board_type == BoardType.APPLE:
         return parse_apple(raw_json, company_name)
     if board_type == BoardType.GOOGLE:
-        if isinstance(raw_json, str):
-            return parse_google_html(raw_json, company_name)
-        return []
+        return parse_google(raw_json, company_name)
     if board_type == BoardType.BYTEDANCE:
         return parse_bytedance(raw_json, company_name)
     if board_type == BoardType.TIKTOK:

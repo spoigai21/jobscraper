@@ -14,7 +14,7 @@ from urllib.parse import parse_qs, urlparse
 import requests
 from bs4 import BeautifulSoup
 
-from monitor.config import Settings
+from monitor.config import PAGE_FETCH_DELAY_SECONDS, Settings
 from monitor.parsers.boards import (
     BoardType,
     detect_board_type,
@@ -27,7 +27,7 @@ from monitor.parsers.tiktok import fetch_tiktok_search_raw, is_tiktok_jobs_url
 from monitor.parsers.html import parse_html_jobs
 from monitor.parsers.amazon import fetch_amazon_search_raw, is_amazon_jobs_url
 from monitor.parsers.apple import fetch_apple_search_raw, is_apple_jobs_url
-from monitor.parsers.google import is_google_careers_url
+from monitor.parsers.google import fetch_google_search_raw, is_google_careers_url
 from monitor.parsers.meta import fetch_meta_search_raw, is_meta_jobs_url
 from monitor.parsers.nasa import is_nasa_company, nasa_jobs_to_text, parse_nasa_html
 from monitor.parsers.tesla import (
@@ -46,9 +46,10 @@ from monitor.scoring import classify_tier, score_job, should_exclude
 
 logger = logging.getLogger(__name__)
 
-# Network retry policy for transient connection failures.
+# Network retry policy for transient connection failures and rate limits.
 _MAX_FETCH_ATTEMPTS = 3
 _FETCH_BACKOFF_SECONDS = 5
+_RETRIABLE_HTTP_STATUSES = frozenset({429, 503})
 
 # Tags stripped before text extraction to reduce navigation/footer noise.
 _STRIP_TAGS = ("script", "style", "nav", "footer", "header")
@@ -263,6 +264,7 @@ class CareerPageScraper:
         total: int | None = None
         offset = 0
         pages_fetched = 0
+        empty_page_retries = 0
 
         while True:
             pages_fetched += 1
@@ -301,8 +303,25 @@ class CareerPageScraper:
                 total = data["total"]
 
             if not postings:
+                if total is not None and len(all_postings) < total:
+                    if empty_page_retries < 1:
+                        empty_page_retries += 1
+                        logger.debug(
+                            "Workday empty page at offset %d (total=%d); retrying once",
+                            offset,
+                            total,
+                        )
+                        continue
+                    logger.warning(
+                        "Workday empty page at offset %d but only %d/%d jobs fetched for %s",
+                        offset,
+                        len(all_postings),
+                        total,
+                        url,
+                    )
                 break
 
+            empty_page_retries = 0
             all_postings.extend(postings)
 
             if len(postings) < page_limit:
@@ -311,6 +330,7 @@ class CareerPageScraper:
                 break
 
             offset += page_limit
+            time.sleep(PAGE_FETCH_DELAY_SECONDS)
 
         return json.dumps(
             {
@@ -377,6 +397,7 @@ class CareerPageScraper:
                 break
 
             start += _MICROSOFT_PAGE_SIZE
+            time.sleep(PAGE_FETCH_DELAY_SECONDS)
 
         return json.dumps(
             {
@@ -445,12 +466,16 @@ class CareerPageScraper:
 
         return " ".join(part for part in parts if part).lower()
 
+    @staticmethod
+    def _fetch_backoff_seconds(attempt: int) -> float:
+        return _FETCH_BACKOFF_SECONDS * (2 ** (attempt - 1))
+
     def fetch(self, url: str) -> str | None:
-        """Fetch raw HTML from ``url``, retrying on connection errors.
+        """Fetch raw HTML from ``url``, retrying on transient failures.
 
         Uses the configured user agent and request timeout. Retries up to three
-        times with a five-second pause between attempts when a connection error
-        occurs. Logs warnings on failure and never raises.
+        times with exponential backoff on connection errors and HTTP 429/503.
+        Logs warnings on failure and never raises.
 
         Args:
             url: Careers page URL to retrieve.
@@ -489,14 +514,11 @@ class CareerPageScraper:
                         timeout=self._settings.request_timeout,
                     )
                 if is_google_careers_url(url):
-                    response = requests.get(
+                    return fetch_google_search_raw(
                         url,
-                        headers=headers,
+                        user_agent=self._settings.user_agent,
                         timeout=self._settings.request_timeout,
-                        allow_redirects=True,
                     )
-                    response.raise_for_status()
-                    return response.text
                 if is_bytedance_jobs_url(url):
                     return fetch_bytedance_search_raw(
                         url,
@@ -526,8 +548,20 @@ class CareerPageScraper:
                     exc,
                 )
                 if attempt < _MAX_FETCH_ATTEMPTS:
-                    time.sleep(_FETCH_BACKOFF_SECONDS)
+                    time.sleep(self._fetch_backoff_seconds(attempt))
             except requests.exceptions.HTTPError as exc:
+                status = exc.response.status_code if exc.response is not None else None
+                if status in _RETRIABLE_HTTP_STATUSES and attempt < _MAX_FETCH_ATTEMPTS:
+                    logger.warning(
+                        "HTTP %s fetching %s (attempt %d/%d): %s",
+                        status,
+                        url,
+                        attempt,
+                        _MAX_FETCH_ATTEMPTS,
+                        exc,
+                    )
+                    time.sleep(self._fetch_backoff_seconds(attempt))
+                    continue
                 logger.warning("HTTP error fetching %s: %s", url, exc)
                 return None
             except requests.exceptions.Timeout as exc:
@@ -850,6 +884,17 @@ class CareerPageScraper:
         if self._is_cooldown_active(state, now):
             self._log_cooldown_suppression(company, state, now)
             return []
+
+        max_alerts = self._settings.max_alerts_per_company_per_cycle
+        if len(alert_payloads) > max_alerts:
+            logger.warning(
+                "Capping alerts for %s: %d qualifying jobs, sending %d (max %d per cycle)",
+                company.name,
+                len(alert_payloads),
+                max_alerts,
+                max_alerts,
+            )
+            alert_payloads = alert_payloads[:max_alerts]
 
         for payload in alert_payloads:
             logger.info(

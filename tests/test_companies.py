@@ -197,7 +197,7 @@ class TestNvidiaBoard:
         assert (
             company.url
             == "https://nvidia.wd5.myworkdayjobs.com/wday/cxs/nvidia/NVIDIAExternalCareerSite/jobs"
-            "?searchText=intern"
+            "?searchText=software engineering intern"
         )
         assert detect_board_type(company.url) == BoardType.WORKDAY
         assert company.enabled is True

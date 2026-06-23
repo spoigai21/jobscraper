@@ -11,6 +11,7 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import requests
 
+from monitor.config import PAGE_FETCH_DELAY_SECONDS
 from monitor.models import JobPosting
 
 logger = logging.getLogger(__name__)
@@ -18,7 +19,6 @@ logger = logging.getLogger(__name__)
 APPLE_JOBS_BASE = "https://jobs.apple.com"
 APPLE_PAGE_SIZE = 20
 MAX_PAGINATION_PAGES = 50
-PAGE_FETCH_DELAY_SECONDS = 0.5
 
 _HYDRATION_RE = re.compile(
     r'window\.__staticRouterHydrationData = JSON\.parse\("(.+?)"\);',
@@ -168,11 +168,10 @@ def fetch_apple_search_raw(
 
         if total_records is not None and len(all_results) >= total_records:
             break
-        if len(page_results) < APPLE_PAGE_SIZE:
+        if page >= MAX_PAGINATION_PAGES:
             break
 
-        if page < MAX_PAGINATION_PAGES:
-            time.sleep(PAGE_FETCH_DELAY_SECONDS)
+        time.sleep(PAGE_FETCH_DELAY_SECONDS)
 
     if not all_results:
         return None

@@ -680,13 +680,44 @@ class TestWorkdayPagination:
         assert len(data["jobPostings"]) == 25
         assert data["total"] == 25
 
-    def test_stops_on_empty_page(self, scraper: CareerPageScraper) -> None:
+    def test_retries_empty_page_when_under_total(
+        self, scraper: CareerPageScraper
+    ) -> None:
+        page_one = [
+            _workday_posting(f"Intern Role {index}") for index in range(_WORKDAY_PAGE_LIMIT)
+        ]
+        page_two = [
+            _workday_posting(f"Intern Role {index}")
+            for index in range(_WORKDAY_PAGE_LIMIT, _WORKDAY_PAGE_LIMIT * 2)
+        ]
+        responses = [
+            _mock_workday_response(status_code=400, postings=[]),
+            _mock_workday_response(total=40, postings=page_one),
+            _mock_workday_response(total=0, postings=[]),
+            _mock_workday_response(total=0, postings=page_two),
+        ]
+
+        with patch("monitor.scraper.requests.post", side_effect=responses) as mock_post:
+            raw = scraper.fetch(WORKDAY_URL)
+
+        assert mock_post.call_count == 4
+        payloads = [call.kwargs["json"] for call in mock_post.call_args_list]
+        assert payloads[2]["offset"] == _WORKDAY_PAGE_LIMIT
+        assert payloads[3]["offset"] == _WORKDAY_PAGE_LIMIT
+
+        data = json.loads(raw or "")
+        assert len(data["jobPostings"]) == _WORKDAY_PAGE_LIMIT * 2
+        assert data["total"] == 40
+
+    def test_stops_on_empty_page_when_total_unknown(
+        self, scraper: CareerPageScraper
+    ) -> None:
         full_page = [
             _workday_posting(f"Intern Role {index}") for index in range(_WORKDAY_PAGE_LIMIT)
         ]
         responses = [
             _mock_workday_response(status_code=400, postings=[]),
-            _mock_workday_response(total=40, postings=full_page),
+            _mock_workday_response(total=None, postings=full_page),
             _mock_workday_response(total=0, postings=[]),
         ]
 
