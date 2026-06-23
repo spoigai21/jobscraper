@@ -14,7 +14,12 @@ from urllib.parse import parse_qs, urlparse
 import requests
 from bs4 import BeautifulSoup
 
-from monitor.config import PAGE_FETCH_DELAY_SECONDS, Settings
+from monitor.config import (
+    EIGHTFOLD_MAX_PAGES,
+    EIGHTFOLD_PAGE_DELAY_SECONDS,
+    PAGE_FETCH_DELAY_SECONDS,
+    Settings,
+)
 from monitor.parsers.boards import (
     BoardType,
     detect_board_type,
@@ -67,8 +72,16 @@ _WORKDAY_PAGE_LIMIT = 20
 # Eightfold PCSX search returns 10 results per page regardless of limit param.
 _MICROSOFT_PAGE_SIZE = 10
 
-# Safety cap for Workday/Microsoft pagination loops when API totals are wrong.
+# Safety cap for Workday pagination loops when API totals are wrong.
 _MAX_PAGINATION_PAGES = 50
+
+
+class EightfoldFetchError(Exception):
+    """Eightfold pagination failed after per-page retries."""
+
+
+class EightfoldRateLimitExhausted(EightfoldFetchError):
+    """Eightfold pagination hit HTTP 429 after per-page retries."""
 
 # Default job-related terms used when scanning diff segments.
 _DEFAULT_JOB_TERMS: tuple[str, ...] = (
@@ -115,6 +128,12 @@ class CareerPageScraper:
         """Initialize the scraper with runtime settings (timeouts, user agent, etc.)."""
         self._settings = settings
         self._profile = profile
+        self._fetch_failure_reason: str | None = None
+        self._last_poll_status: str = "ok"
+
+    @property
+    def last_poll_status(self) -> str:
+        return self._last_poll_status
 
     def _request_headers(self, url: str, *, json_response: bool = False) -> dict[str, str]:
         """Build browser-like headers; job-board APIs request JSON."""
@@ -339,12 +358,88 @@ class CareerPageScraper:
             }
         )
 
+    @staticmethod
+    def _eightfold_board_label(domain: str) -> str:
+        return domain.split(".")[0].replace("-", " ").title()
+
+    def _retry_after_delay(self, response: requests.Response, attempt: int) -> float:
+        retry_after = response.headers.get("Retry-After")
+        if retry_after:
+            try:
+                return max(float(retry_after), 0.0)
+            except ValueError:
+                pass
+        return self._fetch_backoff_seconds(attempt)
+
+    def _fetch_eightfold_page(
+        self,
+        request_url: str,
+        params: dict[str, object],
+        headers: dict[str, str],
+        board_label: str,
+        page_num: int,
+    ) -> requests.Response:
+        """Fetch one Eightfold page, retrying HTTP 429/503 with backoff."""
+        for attempt in range(1, _MAX_FETCH_ATTEMPTS + 1):
+            response = requests.get(
+                request_url,
+                params=params,
+                headers=headers,
+                timeout=self._settings.request_timeout,
+            )
+            if response.status_code in _RETRIABLE_HTTP_STATUSES:
+                delay = self._retry_after_delay(response, attempt)
+                if attempt < _MAX_FETCH_ATTEMPTS:
+                    logger.warning(
+                        "%s HTTP %s on page %d/%d (attempt %d/%d); retrying in %.1fs",
+                        board_label,
+                        response.status_code,
+                        page_num,
+                        EIGHTFOLD_MAX_PAGES,
+                        attempt,
+                        _MAX_FETCH_ATTEMPTS,
+                        delay,
+                    )
+                    time.sleep(delay)
+                    continue
+                logger.error(
+                    "%s HTTP %s on page %d/%d after %d attempts",
+                    board_label,
+                    response.status_code,
+                    page_num,
+                    EIGHTFOLD_MAX_PAGES,
+                    _MAX_FETCH_ATTEMPTS,
+                )
+                if response.status_code == 429:
+                    raise EightfoldRateLimitExhausted(
+                        f"{board_label} rate-limited on page {page_num}"
+                    )
+                raise EightfoldFetchError(
+                    f"{board_label} HTTP {response.status_code} on page {page_num}"
+                )
+            try:
+                response.raise_for_status()
+            except requests.HTTPError as exc:
+                logger.error(
+                    "%s HTTP error on page %d/%d: %s",
+                    board_label,
+                    page_num,
+                    EIGHTFOLD_MAX_PAGES,
+                    exc,
+                )
+                raise EightfoldFetchError(
+                    f"{board_label} fetch failed on page {page_num}"
+                ) from exc
+            return response
+        raise EightfoldFetchError(f"{board_label} fetch failed on page {page_num}")
+
     def _fetch_microsoft(self, url: str, headers: dict[str, str]) -> str:
         """Paginate Eightfold PCSX/apply v2 job search and return aggregated JSON."""
         parsed = urlparse(url.split("?", 1)[0])
         request_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
         domain = self._microsoft_domain(url)
         search_query = self._microsoft_search_query(url)
+        board_label = self._eightfold_board_label(domain)
         all_positions: list[dict] = []
         total: int | None = None
         start = 0
@@ -352,26 +447,28 @@ class CareerPageScraper:
 
         while True:
             pages_fetched += 1
-            if pages_fetched > _MAX_PAGINATION_PAGES:
-                logger.warning(
-                    "Microsoft pagination stopped at %d pages for %s",
-                    _MAX_PAGINATION_PAGES,
+            if pages_fetched > EIGHTFOLD_MAX_PAGES:
+                logger.info(
+                    "%s pagination capped at %d pages for %s",
+                    board_label,
+                    EIGHTFOLD_MAX_PAGES,
                     url,
                 )
                 break
-            response = requests.get(
+            params = {
+                "domain": domain,
+                "query": search_query,
+                "location": "",
+                "start": start,
+                "num": _MICROSOFT_PAGE_SIZE,
+            }
+            response = self._fetch_eightfold_page(
                 request_url,
-                params={
-                    "domain": domain,
-                    "query": search_query,
-                    "location": "",
-                    "start": start,
-                    "num": _MICROSOFT_PAGE_SIZE,
-                },
-                headers=headers,
-                timeout=self._settings.request_timeout,
+                params,
+                headers,
+                board_label,
+                pages_fetched,
             )
-            response.raise_for_status()
             data = response.json()
 
             batch = data.get("positions")
@@ -386,6 +483,14 @@ class CareerPageScraper:
                     if isinstance(nested_total, int):
                         total = nested_total
 
+            logger.info(
+                "%s page %d/%d fetched (%d positions)",
+                board_label,
+                pages_fetched,
+                EIGHTFOLD_MAX_PAGES,
+                len(batch),
+            )
+
             if not batch:
                 break
 
@@ -395,9 +500,11 @@ class CareerPageScraper:
                 break
             if total is not None and len(all_positions) >= total:
                 break
+            if pages_fetched >= EIGHTFOLD_MAX_PAGES:
+                break
 
             start += _MICROSOFT_PAGE_SIZE
-            time.sleep(PAGE_FETCH_DELAY_SECONDS)
+            time.sleep(EIGHTFOLD_PAGE_DELAY_SECONDS)
 
         return json.dumps(
             {
@@ -486,6 +593,7 @@ class CareerPageScraper:
         json_board = self._is_json_job_board_url(url)
         headers = self._request_headers(url, json_response=json_board)
         request_url = url.split("?", 1)[0] if "/wday/cxs/" in url else url
+        self._fetch_failure_reason = None
 
         for attempt in range(1, _MAX_FETCH_ATTEMPTS + 1):
             try:
@@ -494,7 +602,16 @@ class CareerPageScraper:
                 if self._is_uber_jobs_api_url(url):
                     return self._fetch_uber(url, headers)
                 if self._is_eightfold_jobs_url(url):
-                    return self._fetch_microsoft(url, headers)
+                    try:
+                        return self._fetch_microsoft(url, headers)
+                    except EightfoldRateLimitExhausted as exc:
+                        self._fetch_failure_reason = "rate_limited"
+                        logger.error("Eightfold rate limit exhausted for %s: %s", url, exc)
+                        return None
+                    except EightfoldFetchError as exc:
+                        self._fetch_failure_reason = "failed"
+                        logger.error("Eightfold fetch failed for %s: %s", url, exc)
+                        return None
                 if is_meta_jobs_url(url):
                     return fetch_meta_search_raw(
                         url,
@@ -936,6 +1053,7 @@ class CareerPageScraper:
         """Detect new SWE-related listings on NASA STEM Gateway."""
         html = self.fetch(company.url)
         if html is None:
+            self._last_poll_status = self._fetch_failure_reason or "failed"
             state.last_checked = now_iso
             return []
 
@@ -996,6 +1114,7 @@ class CareerPageScraper:
         """
         now = datetime.now(timezone.utc)
         now_iso = now.isoformat()
+        self._last_poll_status = "ok"
 
         try:
             if is_nasa_company(company.name):
@@ -1006,6 +1125,7 @@ class CareerPageScraper:
 
             html = self.fetch(company.url)
             if html is None:
+                self._last_poll_status = self._fetch_failure_reason or "failed"
                 state.last_checked = now_iso
                 return []
 

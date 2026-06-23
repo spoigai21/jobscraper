@@ -21,6 +21,10 @@ DEFAULT_USER_AGENT = (
 # Polite delay between paginated API/page fetches.
 PAGE_FETCH_DELAY_SECONDS = 0.5
 
+# Eightfold PCSX/apply v2 boards (Microsoft, Netflix, etc.) are rate-sensitive.
+EIGHTFOLD_PAGE_DELAY_SECONDS = 2.0
+EIGHTFOLD_MAX_PAGES = 5
+
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 
 

@@ -6,7 +6,7 @@ import json
 import re
 from enum import Enum
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
 from monitor.models import JobPosting
 from monitor.parsers.amazon import is_amazon_jobs_url, parse_amazon

@@ -91,7 +91,13 @@ def run_poll_cycle(
                             payload.job_title or payload.trigger_keyword,
                         )
             else:
-                print(f"OK   {company.name}")
+                status = scraper.last_poll_status
+                if status == "rate_limited":
+                    print(f"RATE {company.name}")
+                elif status == "failed":
+                    print(f"SKIP {company.name} (fetch failed)")
+                else:
+                    print(f"OK   {company.name}")
 
             store.upsert_state(state)
         except Exception:

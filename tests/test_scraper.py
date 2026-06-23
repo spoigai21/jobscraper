@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from monitor.config import Settings
+from monitor.config import EIGHTFOLD_MAX_PAGES, EIGHTFOLD_PAGE_DELAY_SECONDS, Settings
 from monitor.models import AlertPayload, CompanyConfig, StateRecord
 from monitor.profile import load_profile
 from monitor.scraper import CareerPageScraper, _WORKDAY_PAGE_LIMIT, _WORKDAY_REQUESTED_PAGE_LIMIT
@@ -827,11 +827,19 @@ def _microsoft_position(position_id: int, title: str) -> dict[str, object]:
 
 def _mock_microsoft_response(*, count: int, positions: list[dict[str, object]]) -> MagicMock:
     response = MagicMock()
+    response.status_code = 200
     response.raise_for_status.return_value = None
     response.json.return_value = {
         "status": 200,
         "data": {"positions": positions, "count": count},
     }
+    return response
+
+
+def _mock_microsoft_rate_limit(*, retry_after: str | None = None) -> MagicMock:
+    response = MagicMock()
+    response.status_code = 429
+    response.headers = {"Retry-After": retry_after} if retry_after else {}
     return response
 
 
@@ -863,6 +871,83 @@ class TestFetchMicrosoft:
         payload = json.loads(raw)
         assert len(payload["positions"]) == 15
         assert payload["count"] == 15
+
+    def test_caps_pagination_at_five_pages(self, scraper: CareerPageScraper) -> None:
+        pages = [
+            _mock_microsoft_response(
+                count=100,
+                positions=[
+                    _microsoft_position(page * 10 + index, f"Role {page * 10 + index}")
+                    for index in range(10)
+                ],
+            )
+            for page in range(6)
+        ]
+
+        with patch("monitor.scraper.requests.get", side_effect=pages) as mock_get:
+            raw = scraper.fetch(MICROSOFT_URL)
+
+        assert mock_get.call_count == EIGHTFOLD_MAX_PAGES
+        payload = json.loads(raw)
+        assert len(payload["positions"]) == EIGHTFOLD_MAX_PAGES * 10
+
+    def test_retries_single_page_on_429_without_restarting(self, scraper: CareerPageScraper) -> None:
+        page_one = [
+            _microsoft_position(1000 + index, f"Intern Role {index}")
+            for index in range(10)
+        ]
+        page_two = [
+            _microsoft_position(2000 + index, f"Intern Role {10 + index}")
+            for index in range(5)
+        ]
+
+        with patch(
+            "monitor.scraper.requests.get",
+            side_effect=[
+                _mock_microsoft_response(count=15, positions=page_one),
+                _mock_microsoft_rate_limit(retry_after="0"),
+                _mock_microsoft_response(count=15, positions=page_two),
+            ],
+        ) as mock_get, patch("monitor.scraper.time.sleep") as mock_sleep:
+            raw = scraper.fetch(MICROSOFT_URL)
+
+        assert mock_get.call_count == 3
+        mock_sleep.assert_any_call(0.0)
+        payload = json.loads(raw)
+        assert len(payload["positions"]) == 15
+
+    def test_rate_limit_exhaustion_returns_none(self, scraper: CareerPageScraper) -> None:
+        with patch(
+            "monitor.scraper.requests.get",
+            return_value=_mock_microsoft_rate_limit(),
+        ), patch("monitor.scraper.time.sleep"):
+            raw = scraper.fetch(MICROSOFT_URL)
+
+        assert raw is None
+        assert scraper._fetch_failure_reason == "rate_limited"
+
+    def test_uses_eightfold_page_delay_between_pages(
+        self, scraper: CareerPageScraper
+    ) -> None:
+        page_one = [
+            _microsoft_position(1000 + index, f"Intern Role {index}")
+            for index in range(10)
+        ]
+        page_two = [
+            _microsoft_position(2000 + index, f"Intern Role {10 + index}")
+            for index in range(5)
+        ]
+
+        with patch(
+            "monitor.scraper.requests.get",
+            side_effect=[
+                _mock_microsoft_response(count=15, positions=page_one),
+                _mock_microsoft_response(count=15, positions=page_two),
+            ],
+        ), patch("monitor.scraper.time.sleep") as mock_sleep:
+            scraper.fetch(MICROSOFT_URL)
+
+        mock_sleep.assert_called_once_with(EIGHTFOLD_PAGE_DELAY_SECONDS)
 
     def test_extract_text_from_microsoft_json(self, scraper: CareerPageScraper) -> None:
         text = scraper.extract_text(MICROSOFT_BOARD_JSON, MICROSOFT_URL)
