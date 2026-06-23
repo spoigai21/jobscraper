@@ -42,6 +42,10 @@ class Settings:
     max_alerts_per_company_per_cycle: int = 5
     user_agent: str = DEFAULT_USER_AGENT
     monitor_db_path: str = str(DEFAULT_DB_PATH)
+    health_ping_enabled: bool = True
+    health_ping_interval_seconds: int = 86400
+    poll_workers: int = 1
+    poll_domain_max_concurrent: int = 2
 
 
 def _env_int(name: str, default: int) -> int:
@@ -49,6 +53,13 @@ def _env_int(name: str, default: int) -> int:
     if raw is None or raw.strip() == "":
         return default
     return int(raw)
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def get_settings() -> Settings:
@@ -72,6 +83,10 @@ def get_settings() -> Settings:
         ),
         user_agent=os.getenv("USER_AGENT") or DEFAULT_USER_AGENT,
         monitor_db_path=os.getenv("MONITOR_DB_PATH") or str(DEFAULT_DB_PATH),
+        health_ping_enabled=_env_bool("HEALTH_PING_ENABLED", True),
+        health_ping_interval_seconds=_env_int("HEALTH_PING_INTERVAL_SECONDS", 86400),
+        poll_workers=_env_int("POLL_WORKERS", 1),
+        poll_domain_max_concurrent=_env_int("POLL_DOMAIN_MAX_CONCURRENT", 2),
     )
 
 

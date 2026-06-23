@@ -6,7 +6,7 @@ import logging
 import sqlite3
 from datetime import datetime, timezone
 
-from monitor.models import AlertPayload, StateRecord
+from monitor.models import AlertPayload, ClosedJobEvent, StateRecord
 
 from monitor.config import DEFAULT_DB_PATH
 
@@ -56,8 +56,20 @@ class StateStore:
                     email_ok        INTEGER NOT NULL DEFAULT 0
                 );
 
+                CREATE TABLE IF NOT EXISTS closed_jobs (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    company     TEXT NOT NULL,
+                    job_id      TEXT NOT NULL,
+                    job_title   TEXT NOT NULL DEFAULT '',
+                    company_url TEXT NOT NULL DEFAULT '',
+                    detected_at TEXT NOT NULL
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_alert_log_detected_at
                     ON alert_log (detected_at DESC);
+
+                CREATE INDEX IF NOT EXISTS idx_closed_jobs_detected_at
+                    ON closed_jobs (detected_at DESC);
                 """
             )
             conn.commit()
@@ -82,13 +94,19 @@ class StateStore:
             )
             conn.commit()
             logger.info("Migrated company_state: added seen_job_ids column")
+        if "seen_job_titles" not in columns:
+            conn.execute(
+                "ALTER TABLE company_state ADD COLUMN seen_job_titles TEXT NOT NULL DEFAULT '{}'"
+            )
+            conn.commit()
+            logger.info("Migrated company_state: added seen_job_titles column")
 
     def get_state(self, company: str) -> StateRecord | None:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT company, url, last_hash, last_text, seen_job_ids, last_checked,
-                       last_alerted, alert_count
+                SELECT company, url, last_hash, last_text, seen_job_ids, seen_job_titles,
+                       last_checked, last_alerted, alert_count
                 FROM company_state
                 WHERE company = ?
                 """,
@@ -103,6 +121,7 @@ class StateStore:
             last_hash=row["last_hash"],
             last_text=row["last_text"] or "",
             seen_job_ids=row["seen_job_ids"] or "[]",
+            seen_job_titles=row["seen_job_titles"] or "{}",
             last_checked=row["last_checked"],
             last_alerted=row["last_alerted"],
             alert_count=row["alert_count"],
@@ -113,17 +132,18 @@ class StateStore:
             conn.execute(
                 """
                 INSERT INTO company_state (
-                    company, url, last_hash, last_text, seen_job_ids, last_checked,
-                    last_alerted, alert_count
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    company, url, last_hash, last_text, seen_job_ids, seen_job_titles,
+                    last_checked, last_alerted, alert_count
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(company) DO UPDATE SET
-                    url          = excluded.url,
-                    last_hash    = excluded.last_hash,
-                    last_text    = excluded.last_text,
-                    seen_job_ids = excluded.seen_job_ids,
-                    last_checked = excluded.last_checked,
-                    last_alerted = excluded.last_alerted,
-                    alert_count = excluded.alert_count
+                    url             = excluded.url,
+                    last_hash       = excluded.last_hash,
+                    last_text       = excluded.last_text,
+                    seen_job_ids    = excluded.seen_job_ids,
+                    seen_job_titles = excluded.seen_job_titles,
+                    last_checked    = excluded.last_checked,
+                    last_alerted    = excluded.last_alerted,
+                    alert_count     = excluded.alert_count
                 """,
                 (
                     record.company,
@@ -131,6 +151,7 @@ class StateStore:
                     record.last_hash,
                     record.last_text or "",
                     record.seen_job_ids or "[]",
+                    record.seen_job_titles or "{}",
                     record.last_checked,
                     record.last_alerted,
                     record.alert_count,
@@ -160,12 +181,44 @@ class StateStore:
             conn.commit()
         logger.info("Logged alert for %s (%s)", payload.company, payload.trigger_keyword)
 
+    def log_closed_job(self, event: ClosedJobEvent) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO closed_jobs (
+                    company, job_id, job_title, company_url, detected_at
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    event.company,
+                    event.job_id,
+                    event.job_title,
+                    event.company_url,
+                    event.detected_at,
+                ),
+            )
+            conn.commit()
+        logger.debug("Logged closed job for %s (%s)", event.company, event.job_id)
+
+    def get_recent_closed_jobs(self, limit: int = 20) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT company, job_id, job_title, company_url, detected_at
+                FROM closed_jobs
+                ORDER BY detected_at DESC, id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def get_all_states(self) -> list[StateRecord]:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT company, url, last_hash, last_text, seen_job_ids, last_checked,
-                       last_alerted, alert_count
+                SELECT company, url, last_hash, last_text, seen_job_ids, seen_job_titles,
+                       last_checked, last_alerted, alert_count
                 FROM company_state
                 ORDER BY company
                 """
@@ -178,6 +231,7 @@ class StateStore:
                 last_hash=row["last_hash"],
                 last_text=row["last_text"] or "",
                 seen_job_ids=row["seen_job_ids"] or "[]",
+                seen_job_titles=row["seen_job_titles"] or "{}",
                 last_checked=row["last_checked"],
                 last_alerted=row["last_alerted"],
                 alert_count=row["alert_count"],

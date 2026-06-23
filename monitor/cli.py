@@ -167,6 +167,33 @@ def alerts(limit: int) -> None:
         )
 
 
+@cli.command()
+@click.option("--limit", default=20, show_default=True, help="Max recent closed jobs to show.")
+def closed(limit: int) -> None:
+    """List recently closed job listings detected by the monitor."""
+    setup_logging()
+    settings = get_settings()
+    store = StateStore(settings.monitor_db_path)
+    rows = store.get_recent_closed_jobs(limit=limit)
+
+    if not rows:
+        click.echo("No closed listings logged yet.")
+        return
+
+    click.echo(f"Recently closed listings (limit={limit})")
+    click.echo(f"{'Detected':<22} {'Company':<15} {'Job ID':<12} Title")
+    click.echo("-" * 80)
+
+    for row in rows:
+        title = str(row.get("job_title") or "unknown")
+        click.echo(
+            f"{_format_timestamp(row.get('detected_at')):<22} "
+            f"{str(row.get('company', '')):<15} "
+            f"{str(row.get('job_id', '')):<12} "
+            f"{title}"
+        )
+
+
 @cli.command("test-alerts")
 @click.option(
     "--push-only",
