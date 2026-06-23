@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from threading import Lock, Semaphore
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 import schedule
@@ -10,13 +14,18 @@ import schedule
 from monitor.alerts import AlertManager
 from monitor.companies import COMPANIES
 from monitor.config import Settings, get_settings, setup_logging
-from monitor.models import CompanyConfig, StateRecord
+from monitor.models import CompanyConfig, PollResult, StateRecord
 from monitor.profile import UserProfile, load_profile
 from monitor.scraper import CareerPageScraper
-from monitor.storage import StateStore
+from monitor.storage import StateStore, start_time
 
 logger = logging.getLogger(__name__)
 EASTERN = ZoneInfo("America/New_York")
+
+_last_health_ping_at: datetime | None = None
+_poll_cycles_since_last_ping = 0
+_last_cycle_companies_checked = 0
+_last_successful_poll_at: datetime | None = None
 
 
 def _load_user_profile() -> UserProfile | None:
@@ -38,6 +47,27 @@ def get_poll_interval(settings: Settings | None = None) -> int:
     return settings.poll_interval_overnight
 
 
+def _company_netloc(company: CompanyConfig) -> str:
+    return urlparse(company.url).netloc.lower()
+
+
+def _build_domain_semaphores(
+    companies: list[CompanyConfig],
+    max_concurrent: int,
+) -> dict[str, Semaphore]:
+    limit = max(1, max_concurrent)
+    netlocs = {_company_netloc(company) for company in companies}
+    return {netloc: Semaphore(limit) for netloc in netlocs}
+
+
+@dataclass(frozen=True, slots=True)
+class _PollWorkResult:
+    company: CompanyConfig
+    state: StateRecord | None
+    poll_result: PollResult | None
+    error: bool = False
+
+
 def _default_state(company: CompanyConfig) -> StateRecord:
     now_iso = datetime.now(timezone.utc).isoformat()
     return StateRecord(
@@ -51,60 +81,192 @@ def _default_state(company: CompanyConfig) -> StateRecord:
     )
 
 
+def _poll_company_worker(
+    scraper: CareerPageScraper,
+    store: StateStore,
+    company: CompanyConfig,
+    domain_semaphores: dict[str, Semaphore],
+    semaphore_lock: Lock,
+) -> _PollWorkResult:
+    try:
+        state = store.get_state(company.name) or _default_state(company)
+        netloc = _company_netloc(company)
+        semaphore = domain_semaphores.get(netloc)
+        if semaphore is None:
+            with semaphore_lock:
+                semaphore = domain_semaphores.setdefault(
+                    netloc,
+                    Semaphore(1),
+                )
+        with semaphore:
+            poll_result = scraper.poll_company(company, state)
+        return _PollWorkResult(company=company, state=state, poll_result=poll_result)
+    except Exception:
+        logger.exception("Poll cycle failed for %s", company.name)
+        return _PollWorkResult(company=company, state=None, poll_result=None, error=True)
+
+
+def _commit_poll_result(
+    company: CompanyConfig,
+    state: StateRecord,
+    poll_result: PollResult,
+    store: StateStore,
+    alert_manager: AlertManager,
+) -> int:
+    alerts_fired = 0
+
+    for closed in poll_result.closed_jobs:
+        store.log_closed_job(closed)
+
+    if poll_result.alerts:
+        for payload in poll_result.alerts:
+            results = alert_manager.fire(payload)
+            if alert_manager.any_success(results):
+                store.log_alert(payload, results)
+                if payload.job_id:
+                    CareerPageScraper.merge_seen_job_id(state, payload.job_id)
+                elif payload.pending_hash:
+                    state.last_hash = payload.pending_hash
+                    state.last_text = payload.pending_text
+                state.last_alerted = payload.detected_at
+                state.alert_count += 1
+                alerts_fired += 1
+                store.upsert_state(state)
+                label = payload.job_title or payload.trigger_keyword
+                tier_tag = f" [{payload.tier}]" if payload.tier != "standard" else ""
+                print(f"ALERT {company.name} ({label}){tier_tag}")
+            else:
+                logger.warning(
+                    "Delivery failed for %s (%s); will retry next poll",
+                    company.name,
+                    payload.job_title or payload.trigger_keyword,
+                )
+    else:
+        print(f"OK   {company.name}")
+
+    store.upsert_state(state)
+    return alerts_fired
+
+
+def _run_poll_cycle_parallel(
+    scraper: CareerPageScraper,
+    store: StateStore,
+    alert_manager: AlertManager,
+    enabled: list[CompanyConfig],
+    settings: Settings,
+) -> tuple[int, bool]:
+    domain_semaphores = _build_domain_semaphores(
+        enabled,
+        settings.poll_domain_max_concurrent,
+    )
+    semaphore_lock = Lock()
+    alerts_fired = 0
+    cycle_had_success = False
+
+    with ThreadPoolExecutor(max_workers=settings.poll_workers) as executor:
+        futures = [
+            executor.submit(
+                _poll_company_worker,
+                scraper,
+                store,
+                company,
+                domain_semaphores,
+                semaphore_lock,
+            )
+            for company in enabled
+        ]
+        for future in as_completed(futures):
+            work = future.result()
+            if work.error or work.state is None or work.poll_result is None:
+                print(f"ERR  {work.company.name}")
+                continue
+
+            alerts_fired += _commit_poll_result(
+                work.company,
+                work.state,
+                work.poll_result,
+                store,
+                alert_manager,
+            )
+            cycle_had_success = True
+
+    return alerts_fired, cycle_had_success
+
+
 def run_poll_cycle(
     scraper: CareerPageScraper,
     store: StateStore,
     alert_manager: AlertManager,
     companies: list[CompanyConfig],
+    settings: Settings | None = None,
 ) -> None:
+    global _poll_cycles_since_last_ping, _last_cycle_companies_checked, _last_successful_poll_at
+
+    settings = settings or get_settings()
     enabled = [c for c in companies if c.enabled]
-    alerts_fired = 0
 
-    for company in enabled:
-        try:
-            state = store.get_state(company.name) or _default_state(company)
-            payloads = scraper.poll_company(company, state)
+    if settings.poll_workers > 1 and len(enabled) > 1:
+        alerts_fired, cycle_had_success = _run_poll_cycle_parallel(
+            scraper,
+            store,
+            alert_manager,
+            enabled,
+            settings,
+        )
+    else:
+        alerts_fired = 0
+        cycle_had_success = False
 
-            if payloads:
-                for payload in payloads:
-                    results = alert_manager.fire(payload)
-                    if alert_manager.any_success(results):
-                        store.log_alert(payload, results)
-                        if payload.job_id:
-                            CareerPageScraper.merge_seen_job_id(state, payload.job_id)
-                        elif payload.pending_hash:
-                            state.last_hash = payload.pending_hash
-                            state.last_text = payload.pending_text
-                        state.last_alerted = payload.detected_at
-                        state.alert_count += 1
-                        alerts_fired += 1
-                        store.upsert_state(state)
-                        label = payload.job_title or payload.trigger_keyword
-                        tier_tag = (
-                            f" [{payload.tier}]" if payload.tier != "standard" else ""
-                        )
-                        print(f"ALERT {company.name} ({label}){tier_tag}")
-                    else:
-                        logger.warning(
-                            "Delivery failed for %s (%s); will retry next poll",
-                            company.name,
-                            payload.job_title or payload.trigger_keyword,
-                        )
-            else:
-                status = scraper.last_poll_status
-                if status == "rate_limited":
-                    print(f"RATE {company.name}")
-                elif status == "failed":
-                    print(f"SKIP {company.name} (fetch failed)")
-                else:
-                    print(f"OK   {company.name}")
+        for company in enabled:
+            try:
+                state = store.get_state(company.name) or _default_state(company)
+                poll_result = scraper.poll_company(company, state)
+                alerts_fired += _commit_poll_result(
+                    company,
+                    state,
+                    poll_result,
+                    store,
+                    alert_manager,
+                )
+                cycle_had_success = True
+            except Exception:
+                logger.exception("Poll cycle failed for %s", company.name)
+                print(f"ERR  {company.name}")
 
-            store.upsert_state(state)
-        except Exception:
-            logger.exception("Poll cycle failed for %s", company.name)
-            print(f"ERR  {company.name}")
+    if cycle_had_success:
+        _poll_cycles_since_last_ping += 1
+        _last_cycle_companies_checked = len(enabled)
+        _last_successful_poll_at = datetime.now(timezone.utc)
 
     print(f"Checked {len(enabled)} companies, {alerts_fired} alerts fired.")
+    _maybe_send_health_ping(alert_manager, settings)
+
+
+def _maybe_send_health_ping(alert_manager: AlertManager, settings: Settings) -> None:
+    global _last_health_ping_at, _poll_cycles_since_last_ping
+
+    if not settings.health_ping_enabled:
+        return
+    if _poll_cycles_since_last_ping < 1:
+        return
+
+    now = datetime.now(timezone.utc)
+    if _last_health_ping_at is not None:
+        elapsed = (now - _last_health_ping_at).total_seconds()
+        if elapsed < settings.health_ping_interval_seconds:
+            return
+
+    uptime_hours = (now - start_time).total_seconds() / 3600
+    last_poll_at = (
+        _last_successful_poll_at.isoformat() if _last_successful_poll_at else None
+    )
+    if alert_manager.send_health_ping(
+        uptime_hours=uptime_hours,
+        companies_checked=_last_cycle_companies_checked,
+        last_poll_at=last_poll_at,
+    ):
+        _last_health_ping_at = now
+        _poll_cycles_since_last_ping = 0
 
 
 def _poll_and_reschedule(
@@ -113,7 +275,7 @@ def _poll_and_reschedule(
     alert_manager: AlertManager,
     settings: Settings,
 ) -> None:
-    run_poll_cycle(scraper, store, alert_manager, COMPANIES)
+    run_poll_cycle(scraper, store, alert_manager, COMPANIES, settings)
     schedule.clear()
     interval = get_poll_interval(settings)
     schedule.every(interval).seconds.do(

@@ -47,6 +47,21 @@ class AlertPayload:
     pending_text: str = ""
 
 
+@dataclass(frozen=True, slots=True)
+class ClosedJobEvent:
+    company: str
+    job_id: str
+    job_title: str
+    detected_at: str
+    company_url: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class PollResult:
+    alerts: tuple[AlertPayload, ...] = ()
+    closed_jobs: tuple[ClosedJobEvent, ...] = ()
+
+
 @dataclass(slots=True)
 class StateRecord:
     company: str
@@ -57,3 +72,4 @@ class StateRecord:
     alert_count: int
     last_text: str = ""
     seen_job_ids: str = "[]"
+    seen_job_titles: str = "{}"

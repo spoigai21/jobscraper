@@ -219,7 +219,7 @@ class TestPollCompany:
         with patch.object(scraper, "fetch", return_value=html):
             result = scraper.poll_company(company, state)
 
-        assert result == []
+        assert result.alerts == ()
         assert state.last_hash == content_hash
         assert state.alert_count == 0
 
@@ -235,7 +235,7 @@ class TestPollCompany:
         with patch.object(scraper, "fetch", return_value=html):
             result = scraper.poll_company(company, state)
 
-        assert result == []
+        assert result.alerts == ()
         assert state.alert_count == 0
 
     def test_alert_when_hash_changed_keyword_and_cooldown_passed(
@@ -254,8 +254,8 @@ class TestPollCompany:
         with patch.object(scraper, "fetch", return_value=html):
             result = scraper.poll_company(company, state)
 
-        assert len(result) == 1
-        payload = result[0]
+        assert len(result.alerts) == 1
+        payload = result.alerts[0]
         assert isinstance(payload, AlertPayload)
         assert payload.company == "TestCo"
         assert payload.url == company.url
@@ -280,7 +280,7 @@ class TestPollCompany:
         with patch.object(scraper, "fetch", return_value=html):
             result = scraper.poll_company(company, state)
 
-        assert result == []
+        assert result.alerts == ()
         assert state.alert_count == 0
         assert state.last_hash == "stale-hash"
         assert state.last_text == "legacy staff engineer listings only"
@@ -300,7 +300,7 @@ class TestPollCompany:
         with patch.object(scraper, "fetch", return_value=html):
             blocked = scraper.poll_company(company, cooldown_state)
 
-        assert blocked == []
+        assert blocked.alerts == ()
         assert cooldown_state.last_hash == "stale-hash"
 
         ready_state = self._state(
@@ -314,8 +314,8 @@ class TestPollCompany:
         with patch.object(scraper, "fetch", return_value=html):
             result = scraper.poll_company(company, ready_state)
 
-        assert len(result) == 1
-        assert result[0].pending_hash
+        assert len(result.alerts) == 1
+        assert result.alerts[0].pending_hash
 
     def test_first_poll_with_empty_previous_hash(
         self, scraper: CareerPageScraper, company: CompanyConfig
@@ -327,7 +327,7 @@ class TestPollCompany:
         with patch.object(scraper, "fetch", return_value=html):
             result = scraper.poll_company(company, state)
 
-        assert result == []
+        assert result.alerts == ()
         assert state.last_hash == scraper.hash_content(expected_text)
         assert state.last_text == expected_text
         assert state.alert_count == 0
@@ -384,7 +384,7 @@ class TestPollHtmlJobs:
         with patch.object(profiled_scraper, "fetch", return_value=LEVER_HTML_PAGE):
             result = profiled_scraper.poll_company(lever_company, state)
 
-        assert result == []
+        assert result.alerts == ()
         assert json.loads(state.seen_job_ids) == ["lever-1"]
 
     def test_new_html_job_emits_notification_keywords(
@@ -407,8 +407,8 @@ class TestPollHtmlJobs:
         with patch.object(profiled_scraper, "fetch", return_value=LEVER_HTML_PAGE):
             result = profiled_scraper.poll_company(lever_company, state)
 
-        assert len(result) == 1
-        payload = result[0]
+        assert len(result.alerts) == 1
+        payload = result.alerts[0]
         assert payload.job_title == "Software Engineering Intern - Summer 2027"
         assert payload.trigger_keyword == "summer 2027"
         assert payload.notification_keywords
@@ -464,7 +464,7 @@ class TestPollPerJobBoard:
         with patch.object(profiled_scraper, "fetch", return_value=GREENHOUSE_BOARD_JSON):
             result = profiled_scraper.poll_company(greenhouse_company, state)
 
-        assert result == []
+        assert result.alerts == ()
         assert json.loads(state.seen_job_ids) == ["501"]
 
     def test_new_job_emits_scored_alert(
@@ -487,13 +487,13 @@ class TestPollPerJobBoard:
         with patch.object(profiled_scraper, "fetch", return_value=GREENHOUSE_BOARD_JSON):
             result = profiled_scraper.poll_company(greenhouse_company, state)
 
-        assert len(result) == 1
-        payload = result[0]
+        assert len(result.alerts) == 1
+        payload = result.alerts[0]
         assert payload.job_title == "Software Engineering Intern Summer 2027"
         assert payload.relevance_score > 0
         assert payload.tier in ("standard", "high")
         assert payload.job_id == "501"
-        assert json.loads(state.seen_job_ids) == ["999"]
+        assert json.loads(state.seen_job_ids) == []
 
     def test_cooldown_does_not_consume_new_job_id(
         self,
@@ -515,8 +515,8 @@ class TestPollPerJobBoard:
         with patch.object(profiled_scraper, "fetch", return_value=GREENHOUSE_BOARD_JSON):
             blocked = profiled_scraper.poll_company(greenhouse_company, state)
 
-        assert blocked == []
-        assert json.loads(state.seen_job_ids) == ["999"]
+        assert blocked.alerts == ()
+        assert json.loads(state.seen_job_ids) == []
 
         state.last_alerted = (
             datetime.now(timezone.utc) - timedelta(seconds=7200)
@@ -525,9 +525,9 @@ class TestPollPerJobBoard:
         with patch.object(profiled_scraper, "fetch", return_value=GREENHOUSE_BOARD_JSON):
             result = profiled_scraper.poll_company(greenhouse_company, state)
 
-        assert len(result) == 1
-        assert result[0].job_id == "501"
-        assert json.loads(state.seen_job_ids) == ["999"]
+        assert len(result.alerts) == 1
+        assert result.alerts[0].job_id == "501"
+        assert json.loads(state.seen_job_ids) == []
 
 
 WORKDAY_BOARD_JSON = json.dumps(
@@ -586,7 +586,7 @@ class TestPollWorkdayBoard:
         with patch.object(profiled_scraper, "fetch", return_value=WORKDAY_BOARD_JSON):
             result = profiled_scraper.poll_company(workday_company, state)
 
-        assert result == []
+        assert result.alerts == ()
         assert set(json.loads(state.seen_job_ids)) == {"JR501", "JR999"}
 
     def test_new_workday_intern_emits_scored_alert(
@@ -609,8 +609,8 @@ class TestPollWorkdayBoard:
         with patch.object(profiled_scraper, "fetch", return_value=WORKDAY_BOARD_JSON):
             result = profiled_scraper.poll_company(workday_company, state)
 
-        assert len(result) == 1
-        assert result[0].job_title == "Software Engineering Intern Summer 2027"
+        assert len(result.alerts) == 1
+        assert result.alerts[0].job_title == "Software Engineering Intern Summer 2027"
 
     def test_non_intern_workday_job_rotation_does_not_alert(
         self,
@@ -651,8 +651,8 @@ class TestPollWorkdayBoard:
         with patch.object(profiled_scraper, "fetch", return_value=rotated):
             result = profiled_scraper.poll_company(workday_company, state)
 
-        assert result == []
-        assert set(json.loads(state.seen_job_ids)) == {"JR501", "JR777", "JR999"}
+        assert result.alerts == ()
+        assert set(json.loads(state.seen_job_ids)) == {"JR501", "JR777"}
 
 
 WORKDAY_URL = (
@@ -1029,7 +1029,7 @@ class TestPollMicrosoftBoard:
         ):
             result = profiled_scraper.poll_company(microsoft_company, state)
 
-        assert result == []
+        assert result.alerts == ()
         assert set(json.loads(state.seen_job_ids)) == {
             "1970393556864498",
             "1970393556862611",
@@ -1057,7 +1057,7 @@ class TestPollMicrosoftBoard:
         ):
             result = profiled_scraper.poll_company(microsoft_company, state)
 
-        assert len(result) == 1
-        assert result[0].job_title == (
+        assert len(result.alerts) == 1
+        assert result.alerts[0].job_title == (
             "Software Engineering Intern - AI Frontiers - Summer 2027"
         )

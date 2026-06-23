@@ -160,7 +160,9 @@ railway variables set NTFY_TOKEN=tk_xxxxxxxx
 railway variables set ALERT_EMAIL_TO=you@gmail.com
 ```
 
-Optional tuning variables (`POLL_INTERVAL_BUSINESS`, `POLL_INTERVAL_OVERNIGHT`, etc.) can be set the same way.
+Optional tuning variables (`POLL_INTERVAL_BUSINESS`, `POLL_INTERVAL_OVERNIGHT`, `POLL_WORKERS`, etc.) can be set the same way.
+
+To poll companies in parallel (faster cycles, more HTTP concurrency), set `POLL_WORKERS=4` in `.env`. Default `POLL_WORKERS=1` keeps sequential polling. Use `POLL_DOMAIN_MAX_CONCURRENT=2` to cap simultaneous requests per careers-site domain.
 
 ### 4. Attach persistent storage (recommended)
 
