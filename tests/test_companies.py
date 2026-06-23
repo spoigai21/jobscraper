@@ -138,6 +138,18 @@ class TestZiplineBoard:
         assert company.enabled is True
 
 
+class TestCloudflareBoard:
+    def test_uses_greenhouse_api(self) -> None:
+        company = _company("Cloudflare")
+
+        assert (
+            company.url
+            == "https://boards-api.greenhouse.io/v1/boards/cloudflare/jobs?content=true"
+        )
+        assert detect_board_type(company.url) == BoardType.GREENHOUSE
+        assert company.enabled is True
+
+
 class TestSnapBoard:
     def test_uses_workday_api(self) -> None:
         company = _company("Snap")
@@ -159,6 +171,19 @@ class TestAdobeBoard:
             company.url
             == "https://adobe.wd5.myworkdayjobs.com/wday/cxs/adobe/external_experienced/jobs"
             "?searchText=internship"
+        )
+        assert detect_board_type(company.url) == BoardType.WORKDAY
+        assert company.enabled is True
+
+
+class TestCrowdStrikeBoard:
+    def test_uses_workday_api(self) -> None:
+        company = _company("CrowdStrike")
+
+        assert (
+            company.url
+            == "https://crowdstrike.wd5.myworkdayjobs.com/wday/cxs/crowdstrike/"
+            "crowdstrikecareers/jobs?searchText=internship"
         )
         assert detect_board_type(company.url) == BoardType.WORKDAY
         assert company.enabled is True

@@ -206,6 +206,7 @@ COMPANIES: list[CompanyConfig] = [
         keywords=FILTERED_INTERN_KEYWORDS,
         enabled=True,
     ),
+    # REMOVED — Symbotic: Workday cxs API (wd504; symbotic.wd1 redirects to maintenance)
     CompanyConfig(
         name="Databricks",
         url="https://boards-api.greenhouse.io/v1/boards/databricks/jobs?content=true",
@@ -293,6 +294,15 @@ COMPANIES: list[CompanyConfig] = [
     CompanyConfig(
         name="Cloudflare",
         url="https://boards-api.greenhouse.io/v1/boards/cloudflare/jobs?content=true",
+        keywords=FILTERED_INTERN_KEYWORDS,
+        enabled=True,
+    ),
+    CompanyConfig(
+        name="CrowdStrike",
+        url=(
+            "https://crowdstrike.wd5.myworkdayjobs.com/wday/cxs/crowdstrike/"
+            "crowdstrikecareers/jobs?searchText=internship"
+        ),
         keywords=FILTERED_INTERN_KEYWORDS,
         enabled=True,
     ),

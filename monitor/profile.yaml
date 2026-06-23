@@ -163,6 +163,7 @@ prestige:
     - Airbnb
     - Pinterest
     - SpaceX
+    - Cloudflare
   tier_b:
     - Zoox
     - Mobileye
@@ -174,13 +175,13 @@ prestige:
     - Relativity
     - Muon Space
     - Astranis
+    - CrowdStrike
     - JPL
     - Tesla
   tier_c:
     - Ramp
     - DoorDash
     - Lyft
-    - Cloudflare
     - MongoDB
     - Figma
     - Discord
