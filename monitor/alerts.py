@@ -304,6 +304,51 @@ class AlertManager:
             logger.info("Push sent for %s", payload.company)
         return ok
 
+    def send_health_ping(
+        self,
+        *,
+        uptime_hours: float,
+        companies_checked: int,
+        last_poll_at: str | None,
+    ) -> bool:
+        """Send a low-priority ntfy push confirming the monitor is alive."""
+        if not self._settings.ntfy_topic:
+            logger.error("Health ping skipped: NTFY_TOPIC is not configured")
+            return False
+
+        last_poll_line = last_poll_at or "unknown"
+        body = (
+            f"Monitor is alive.\n"
+            f"Uptime: {uptime_hours:.1f} hours\n"
+            f"Companies checked (last cycle): {companies_checked}\n"
+            f"Last successful poll: {last_poll_line}"
+        )
+        headers = {
+            "Title": "Internship monitor heartbeat",
+            "Priority": "low",
+            "Tags": "heartbeat,white_check_mark",
+        }
+        url = f"{NTFY_BASE_URL}/{self._settings.ntfy_topic}"
+        try:
+            response = requests.post(
+                url,
+                headers=headers,
+                data=body.encode("utf-8"),
+                timeout=self._settings.request_timeout,
+            )
+            if not response.ok:
+                logger.error(
+                    "Health ping ntfy request failed (%s): %s",
+                    response.status_code,
+                    response.text.strip(),
+                )
+                return False
+            logger.info("Health ping sent")
+            return True
+        except Exception:
+            logger.exception("Failed to send health ping")
+            return False
+
     def _send_email_ntfy(self, payload: AlertPayload, body: str) -> bool:
         ok = self._post_ntfy(
             payload,

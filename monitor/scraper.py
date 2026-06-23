@@ -36,7 +36,14 @@ from monitor.parsers.tesla import (
     parse_tesla_state,
     tesla_jobs_to_text,
 )
-from monitor.models import AlertPayload, CompanyConfig, JobPosting, StateRecord
+from monitor.models import (
+    AlertPayload,
+    ClosedJobEvent,
+    CompanyConfig,
+    JobPosting,
+    PollResult,
+    StateRecord,
+)
 from monitor.notification_keywords import (
     select_notification_keywords,
     title_from_diff_snippet,
@@ -173,6 +180,34 @@ class CareerPageScraper:
     @staticmethod
     def _save_seen_job_ids(state: StateRecord, job_ids: set[str]) -> None:
         state.seen_job_ids = json.dumps(sorted(job_ids))
+
+    @staticmethod
+    def _load_seen_job_titles(state: StateRecord) -> dict[str, str]:
+        try:
+            loaded = json.loads(state.seen_job_titles or "{}")
+        except json.JSONDecodeError:
+            return {}
+        if not isinstance(loaded, dict):
+            return {}
+        return {str(job_id): str(title) for job_id, title in loaded.items()}
+
+    @staticmethod
+    def _save_seen_job_titles(state: StateRecord, titles: dict[str, str]) -> None:
+        state.seen_job_titles = json.dumps(dict(sorted(titles.items())))
+
+    @staticmethod
+    def _update_seen_job_titles(
+        state: StateRecord,
+        jobs: list[JobPosting],
+        *,
+        remove_ids: set[str] | None = None,
+    ) -> None:
+        titles = CareerPageScraper._load_seen_job_titles(state)
+        for job in jobs:
+            titles[job.id] = job.title
+        for job_id in remove_ids or set():
+            titles.pop(job_id, None)
+        CareerPageScraper._save_seen_job_titles(state, titles)
 
     @staticmethod
     def _is_json_job_board_url(url: str) -> bool:
@@ -837,28 +872,55 @@ class CareerPageScraper:
         now_iso: str,
         *,
         seed_label: str = "job",
-    ) -> list[AlertPayload]:
+    ) -> PollResult:
         """Detect new listings by diffing stable job IDs."""
         seen_ids = self._load_seen_job_ids(state)
+        job_titles = self._load_seen_job_titles(state)
+        current_ids = {job.id for job in jobs}
+        is_first_seed = not seen_ids and not (state.last_hash or "").strip()
 
         state.last_hash = self.hash_content(text)
         state.last_text = text
         state.last_checked = now_iso
 
-        if not seen_ids:
-            current_ids = {job.id for job in jobs}
+        if is_first_seed:
             self._save_seen_job_ids(state, current_ids)
+            self._update_seen_job_titles(state, jobs)
             logger.debug(
                 "Seeding %s IDs for %s (%d listings)",
                 seed_label,
                 company.name,
                 len(current_ids),
             )
-            return []
+            return PollResult()
+
+        closed_ids = seen_ids - current_ids
+        closed_jobs: list[ClosedJobEvent] = []
+        for job_id in sorted(closed_ids):
+            title = job_titles.get(job_id) or "unknown"
+            logger.info(
+                "Job closed for %s: %s (%s)",
+                company.name,
+                title,
+                job_id,
+            )
+            closed_jobs.append(
+                ClosedJobEvent(
+                    company=company.name,
+                    job_id=job_id,
+                    job_title=title,
+                    detected_at=now_iso,
+                    company_url=company.url,
+                )
+            )
+
+        seen_ids &= current_ids
+        self._update_seen_job_titles(state, jobs, remove_ids=closed_ids)
+        self._save_seen_job_ids(state, seen_ids)
 
         new_jobs = [job for job in jobs if job.id not in seen_ids]
         if not new_jobs:
-            return []
+            return PollResult(closed_jobs=tuple(closed_jobs))
 
         filtered_ids: set[str] = set()
         alert_payloads: list[AlertPayload] = []
@@ -879,11 +941,11 @@ class CareerPageScraper:
                 len(new_jobs),
                 company.name,
             )
-            return []
+            return PollResult(closed_jobs=tuple(closed_jobs))
 
         if self._is_cooldown_active(state, now):
             self._log_cooldown_suppression(company, state, now)
-            return []
+            return PollResult(closed_jobs=tuple(closed_jobs))
 
         max_alerts = self._settings.max_alerts_per_company_per_cycle
         if len(alert_payloads) > max_alerts:
@@ -905,7 +967,10 @@ class CareerPageScraper:
                 payload.tier,
             )
 
-        return alert_payloads
+        return PollResult(
+            alerts=tuple(alert_payloads),
+            closed_jobs=tuple(closed_jobs),
+        )
 
     def _poll_per_job_board(
         self,
@@ -914,7 +979,7 @@ class CareerPageScraper:
         raw: str,
         now: datetime,
         now_iso: str,
-    ) -> list[AlertPayload]:
+    ) -> PollResult:
         """Detect new listings on Greenhouse, Ashby, or Lever JSON boards."""
         jobs = parse_job_board(raw, company.url, company.name)
         return self._poll_by_job_ids(
@@ -932,12 +997,12 @@ class CareerPageScraper:
         state: StateRecord,
         now: datetime,
         now_iso: str,
-    ) -> list[AlertPayload]:
+    ) -> PollResult:
         """Detect new SWE-related listings on NASA STEM Gateway."""
         html = self.fetch(company.url)
         if html is None:
             state.last_checked = now_iso
-            return []
+            return PollResult()
 
         jobs = parse_nasa_html(html, company.name, base_url=company.url)
         return self._poll_by_job_ids(
@@ -956,13 +1021,13 @@ class CareerPageScraper:
         state: StateRecord,
         now: datetime,
         now_iso: str,
-    ) -> list[AlertPayload]:
+    ) -> PollResult:
         """Detect new internship listings from Tesla careers state JSON."""
         tesla_scraper = TeslaScraper(self._settings)
         raw = tesla_scraper.fetch_state(company.url)
         if raw is None:
             state.last_checked = now_iso
-            return []
+            return PollResult()
 
         jobs = parse_tesla_state(raw, company.name, source_url=company.url)
         return self._poll_by_job_ids(
@@ -979,7 +1044,7 @@ class CareerPageScraper:
         self,
         company: CompanyConfig,
         state: StateRecord,
-    ) -> list[AlertPayload]:
+    ) -> PollResult:
         """Poll a single company careers page and optionally emit alerts.
 
         JSON boards (Greenhouse/Ashby/Lever): fetch → parse jobs → diff IDs →
@@ -992,7 +1057,7 @@ class CareerPageScraper:
             state: Mutable persisted state for this company.
 
         Returns:
-            Zero or more alert payloads for newly detected qualifying jobs.
+            Alerts and closed-job events from this poll.
         """
         now = datetime.now(timezone.utc)
         now_iso = now.isoformat()
@@ -1007,7 +1072,7 @@ class CareerPageScraper:
             html = self.fetch(company.url)
             if html is None:
                 state.last_checked = now_iso
-                return []
+                return PollResult()
 
             if self._is_per_job_board_url(company.url):
                 return self._poll_per_job_board(company, state, html, now, now_iso)
@@ -1035,7 +1100,7 @@ class CareerPageScraper:
             state.last_checked = now_iso
 
             if not hash_changed:
-                return []
+                return PollResult()
 
             # First successful poll seeds baseline text without alerting.
             if not previous_hash:
@@ -1046,7 +1111,7 @@ class CareerPageScraper:
                     company.name,
                     content_hash[:8],
                 )
-                return []
+                return PollResult()
 
             job_snippet = self._find_job_snippet(previous_text, text, company.keywords)
             matched_keyword = self.check_keywords(text, company.keywords)
@@ -1059,16 +1124,16 @@ class CareerPageScraper:
                     "Ignoring trivial change for %s (no substantial diff)",
                     company.name,
                 )
-                return []
+                return PollResult()
 
             if matched_keyword is None and job_snippet is None:
                 state.last_hash = content_hash
                 state.last_text = text
-                return []
+                return PollResult()
 
             if self._is_cooldown_active(state, now):
                 self._log_cooldown_suppression(company, state, now)
-                return []
+                return PollResult()
 
             diff_snippet = self.get_diff_snippet(
                 previous_text,
@@ -1094,21 +1159,23 @@ class CareerPageScraper:
                 trigger_keyword,
             )
 
-            return [
-                AlertPayload(
-                    company=company.name,
-                    url=company.url,
-                    job_title=job_title,
-                    job_url=company.url,
-                    trigger_keyword=trigger_keyword,
-                    detected_at=now_iso,
-                    diff_snippet=diff_snippet,
-                    notification_keywords=notification_keywords,
-                    pending_hash=content_hash,
-                    pending_text=text,
+            return PollResult(
+                alerts=(
+                    AlertPayload(
+                        company=company.name,
+                        url=company.url,
+                        job_title=job_title,
+                        job_url=company.url,
+                        trigger_keyword=trigger_keyword,
+                        detected_at=now_iso,
+                        diff_snippet=diff_snippet,
+                        notification_keywords=notification_keywords,
+                        pending_hash=content_hash,
+                        pending_text=text,
+                    ),
                 )
-            ]
+            )
         except Exception:
             logger.exception("Unexpected error polling %s", company.name)
             state.last_checked = now_iso
-            return []
+            return PollResult()
