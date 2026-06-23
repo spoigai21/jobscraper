@@ -151,6 +151,90 @@ class TestExclusions:
 
         assert should_exclude(job, profile)
 
+    def test_india_only_location_excluded(self, profile) -> None:
+        job = _job(
+            title="Software Engineering Intern",
+            department="Engineering",
+            location="Bengaluru, Karnataka, India",
+            description="Build backend services.",
+        )
+
+        assert should_exclude(job, profile)
+
+    def test_vague_multi_location_allowed(self, profile) -> None:
+        job = _job(
+            title="Software Developer Internship - Undergraduate",
+            department="Engineering",
+            location="3 Locations",
+            company_name="Blue Origin",
+            description="Spring 2027 software internship.",
+        )
+
+        assert not should_exclude(job, profile)
+
+    def test_city_only_location_allowed(self, profile) -> None:
+        job = _job(
+            title="Software Engineering Intern",
+            department="Engineering",
+            location="San Jose",
+            description="Build backend services.",
+        )
+
+        assert not should_exclude(job, profile)
+
+    def test_canadian_province_without_country_excluded(self, profile) -> None:
+        job = _job(
+            title="Software Engineering Intern",
+            department="Engineering",
+            location="Toronto, ON",
+            description="Build backend services.",
+        )
+
+        assert should_exclude(job, profile)
+
+    def test_puerto_rico_excluded(self, profile) -> None:
+        job = _job(
+            title="Software Engineering Intern",
+            department="Engineering",
+            location="San Juan, Puerto Rico",
+            description="Build backend services.",
+        )
+
+        assert should_exclude(job, profile)
+
+    def test_mixed_us_and_foreign_location_allowed(self, profile) -> None:
+        job = _job(
+            title="Software Engineering Intern",
+            department="Engineering",
+            location=(
+                "Mountain View, CA, USA; Waterloo, ON, Canada; "
+                "Montreal, QC, Canada"
+            ),
+            description="Build backend services for summer 2027.",
+        )
+
+        assert not should_exclude(job, profile)
+
+    def test_remote_foreign_only_excluded(self, profile) -> None:
+        job = _job(
+            title="Software Engineering Intern",
+            department="Engineering",
+            location="Remote - India",
+            description="Build backend services.",
+        )
+
+        assert should_exclude(job, profile)
+
+    def test_remote_without_country_allowed(self, profile) -> None:
+        job = _job(
+            title="Software Engineering Intern",
+            department="Engineering",
+            location="Remote",
+            description="Build backend services.",
+        )
+
+        assert not should_exclude(job, profile)
+
     def test_us_state_location_allowed(self, profile) -> None:
         job = _job(
             title="Software Engineering Intern",
