@@ -22,6 +22,8 @@ __all__ = [
     "detect_board_type",
     "format_new_jobs_snippet",
     "job_matches_keyword",
+    "job_matches_level_and_cycle",
+    "match_level_and_cycle_in_text",
     "jobs_to_text",
     "parse_amazon",
     "parse_apple",
@@ -475,18 +477,52 @@ def jobs_to_text(jobs: list[JobPosting]) -> str:
     return " ".join(part for part in parts if part).lower()
 
 
-def job_matches_keyword(job: JobPosting, keywords: list[str]) -> str | None:
+def _text_matches_keyword(text: str, keyword: str) -> bool:
+    lowered_keyword = keyword.lower()
+    if lowered_keyword in {"intern", "2027"}:
+        return bool(re.search(rf"\b{re.escape(lowered_keyword)}\b", text))
+    return lowered_keyword in text
+
+
+def _first_matching_keyword(text: str, keywords: list[str]) -> str | None:
+    for keyword in keywords:
+        if _text_matches_keyword(text, keyword):
+            return keyword
+    return None
+
+
+def match_level_and_cycle_in_text(
+    text: str,
+    level_keywords: list[str],
+    cycle_keywords: list[str],
+) -> str | None:
+    """Return the matched cycle keyword when both groups match, else None."""
+    lowered = text.lower()
+    if _first_matching_keyword(lowered, level_keywords) is None:
+        return None
+    return _first_matching_keyword(lowered, cycle_keywords)
+
+
+def job_matches_level_and_cycle(
+    job: JobPosting,
+    level_keywords: list[str],
+    cycle_keywords: list[str],
+) -> str | None:
+    """Require a level term and a cycle term; return the cycle match as trigger."""
     searchable = " ".join(
         [job.title, job.department, job.location, job.description]
     ).lower()
-    for keyword in keywords:
-        lowered_keyword = keyword.lower()
-        if lowered_keyword in {"intern", "2027"}:
-            if re.search(rf"\b{re.escape(lowered_keyword)}\b", searchable):
-                return keyword
-        elif lowered_keyword in searchable:
-            return keyword
-    return None
+    return match_level_and_cycle_in_text(
+        searchable, level_keywords, cycle_keywords
+    )
+
+
+def job_matches_keyword(job: JobPosting, keywords: list[str]) -> str | None:
+    """Return the first OR-matched keyword from a flat list (legacy helper)."""
+    searchable = " ".join(
+        [job.title, job.department, job.location, job.description]
+    ).lower()
+    return _first_matching_keyword(searchable, keywords)
 
 
 def format_new_jobs_snippet(jobs: list[JobPosting], *, limit: int = 3) -> str:

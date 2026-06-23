@@ -21,8 +21,13 @@ class JobPosting:
 class CompanyConfig:
     name: str
     url: str
-    keywords: list[str]
+    level_keywords: list[str]
+    cycle_keywords: list[str]
     enabled: bool
+
+    def all_keywords(self) -> tuple[str, ...]:
+        """All configured level and cycle terms (for diff/snippet search)."""
+        return (*self.level_keywords, *self.cycle_keywords)
 
 
 @dataclass(frozen=True, slots=True)

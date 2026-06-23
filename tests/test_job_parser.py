@@ -7,11 +7,13 @@ from pathlib import Path
 
 import pytest
 
+from monitor.companies import INTERN_CYCLE_KEYWORDS, INTERN_LEVEL_KEYWORDS
 from monitor.models import JobPosting
 from monitor.parsers.boards import (
     BoardType,
     detect_board_type,
     job_matches_keyword,
+    job_matches_level_and_cycle,
     jobs_to_text,
     parse_ashby,
     parse_bytedance,
@@ -477,18 +479,93 @@ class TestJobHelpers:
 
     def test_job_matches_2027_seasonal_keyword(self, ashby_json: dict) -> None:
         jobs = parse_ashby(ashby_json, "Skydio")
-        keywords = ["summer 2027", "intern", "internship"]
 
-        assert job_matches_keyword(jobs[0], keywords) == "summer 2027"
+        assert (
+            job_matches_level_and_cycle(
+                jobs[0], INTERN_LEVEL_KEYWORDS, INTERN_CYCLE_KEYWORDS
+            )
+            == "summer 2027"
+        )
 
     def test_job_matches_intern_word_boundary(self, greenhouse_json: dict) -> None:
         jobs = parse_greenhouse(greenhouse_json, "Waymo")
         intern_job = jobs[0]
         internal_job = jobs[1]
 
+        assert (
+            job_matches_level_and_cycle(
+                intern_job, INTERN_LEVEL_KEYWORDS, INTERN_CYCLE_KEYWORDS
+            )
+            == "summer 2027"
+        )
         assert job_matches_keyword(intern_job, ["intern"]) == "intern"
         assert job_matches_keyword(internal_job, ["intern"]) is None
+        assert (
+            job_matches_level_and_cycle(
+                internal_job, INTERN_LEVEL_KEYWORDS, INTERN_CYCLE_KEYWORDS
+            )
+            is None
+        )
 
     def test_job_matches_co_op_2027(self, lever_json: list) -> None:
         jobs = parse_lever(lever_json, "Zoox")
-        assert job_matches_keyword(jobs[0], ["co-op 2027"]) == "co-op 2027"
+        assert (
+            job_matches_level_and_cycle(
+                jobs[0], INTERN_LEVEL_KEYWORDS, INTERN_CYCLE_KEYWORDS
+            )
+            == "co-op 2027"
+        )
+
+    def test_job_matches_undergraduate_in_description(self) -> None:
+        job = JobPosting(
+            id="undergrad-only",
+            title="Software Engineer - Summer 2027",
+            department="Engineering",
+            location="San Francisco, CA",
+            url="https://example.com/jobs/1",
+            description=(
+                "Open to students pursuing undergraduate degrees in computer science."
+            ),
+            company_name="ExampleCo",
+        )
+
+        assert job_matches_keyword(job, ["undergraduate"]) == "undergraduate"
+        assert (
+            job_matches_level_and_cycle(
+                job, INTERN_LEVEL_KEYWORDS, INTERN_CYCLE_KEYWORDS
+            )
+            == "summer 2027"
+        )
+
+    def test_undergraduate_alone_does_not_qualify_without_cycle(self) -> None:
+        job = JobPosting(
+            id="undergrad-no-cycle",
+            title="Software Engineer",
+            department="Engineering",
+            location="San Francisco, CA",
+            url="https://example.com/jobs/2",
+            description="Open to students pursuing undergraduate degrees in CS.",
+            company_name="ExampleCo",
+        )
+
+        assert (
+            job_matches_level_and_cycle(
+                job, INTERN_LEVEL_KEYWORDS, INTERN_CYCLE_KEYWORDS
+            )
+            is None
+        )
+
+    def test_amazon_fixture_description_includes_undergraduates(self) -> None:
+        from monitor.parsers.amazon import parse_amazon
+
+        raw = json.loads(
+            (FIXTURES_DIR / "amazon_sample.json").read_text(encoding="utf-8")
+        )
+        jobs = parse_amazon(raw, "Amazon")
+        assert "undergraduates" in jobs[1].description.lower()
+        assert (
+            job_matches_level_and_cycle(
+                jobs[1], INTERN_LEVEL_KEYWORDS, INTERN_CYCLE_KEYWORDS
+            )
+            == "2027"
+        )

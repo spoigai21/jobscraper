@@ -9,6 +9,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from monitor.companies import (
+    INTERN_CYCLE_KEYWORDS,
+    INTERN_LEVEL_KEYWORDS,
+    STRICT_INTERN_LEVEL_KEYWORDS,
+)
 from monitor.config import EIGHTFOLD_MAX_PAGES, EIGHTFOLD_PAGE_DELAY_SECONDS, Settings
 from monitor.models import AlertPayload, CompanyConfig, StateRecord
 from monitor.profile import load_profile
@@ -56,16 +61,8 @@ def company() -> CompanyConfig:
     return CompanyConfig(
         name="TestCo",
         url="https://example.com/careers",
-        keywords=[
-            "intern",
-            "internship",
-            "spring 2027",
-            "summer 2027",
-            "fall 2027",
-            "co-op 2027",
-            "co-op",
-            "residency",
-        ],
+        level_keywords=INTERN_LEVEL_KEYWORDS,
+        cycle_keywords=INTERN_CYCLE_KEYWORDS,
         enabled=True,
     )
 
@@ -96,31 +93,71 @@ class TestHashContent:
         assert scraper.hash_content(text) == expected
 
 
-class TestCheckKeywords:
-    def test_case_insensitive_first_match(self, scraper: CareerPageScraper) -> None:
+class TestCheckLevelAndCycle:
+    def test_case_insensitive_cycle_match(self, scraper: CareerPageScraper) -> None:
         text = "we are hiring summer INTERN roles for 2027"
-        keywords = ["INTERN", "2027", "internship"]
+        level_keywords = ["INTERN"]
+        cycle_keywords = ["2027", "summer 2027"]
 
-        assert scraper.check_keywords(text, keywords) == "INTERN"
+        assert (
+            scraper.check_level_and_cycle(text, level_keywords, cycle_keywords) == "2027"
+        )
 
     def test_matches_2027_seasonal_phrases(self, scraper: CareerPageScraper) -> None:
-        text = "now accepting applications for summer 2027 and co-op 2027 programs"
-        keywords = ["summer 2027", "co-op 2027", "fall 2027"]
+        text = (
+            "now accepting internship applications for summer 2027 and co-op 2027 programs"
+        )
+        level_keywords = ["internship"]
+        cycle_keywords = ["summer 2027", "co-op 2027", "fall 2027"]
 
-        assert scraper.check_keywords(text, keywords) == "summer 2027"
+        assert (
+            scraper.check_level_and_cycle(text, level_keywords, cycle_keywords)
+            == "summer 2027"
+        )
 
     def test_intern_word_boundary_avoids_internal(self, scraper: CareerPageScraper) -> None:
-        assert scraper.check_keywords("internal communications team", ["intern"]) is None
-        assert scraper.check_keywords("summer intern program", ["intern"]) == "intern"
+        cycle_keywords = ["2027"]
+        assert (
+            scraper.check_level_and_cycle(
+                "internal communications team", ["intern"], cycle_keywords
+            )
+            is None
+        )
+        assert (
+            scraper.check_level_and_cycle(
+                "summer intern program", ["intern"], cycle_keywords
+            )
+            is None
+        )
 
     def test_2027_word_boundary(self, scraper: CareerPageScraper) -> None:
-        assert scraper.check_keywords("role id 20271 posted", ["2027"]) is None
-        assert scraper.check_keywords("summer 2027 internship", ["2027"]) == "2027"
+        level_keywords = ["internship"]
+        assert (
+            scraper.check_level_and_cycle(
+                "role id 20271 posted", level_keywords, ["2027"]
+            )
+            is None
+        )
+        assert (
+            scraper.check_level_and_cycle(
+                "summer 2027 internship", level_keywords, ["2027"]
+            )
+            == "2027"
+        )
 
-    def test_returns_none_when_no_match(self, scraper: CareerPageScraper) -> None:
-        assert scraper.check_keywords(
-            "full-time engineer", ["intern", "summer 2027"]
-        ) is None
+    def test_requires_both_level_and_cycle(self, scraper: CareerPageScraper) -> None:
+        assert (
+            scraper.check_level_and_cycle(
+                "full-time engineer", ["intern"], ["summer 2027"]
+            )
+            is None
+        )
+        assert (
+            scraper.check_level_and_cycle(
+                "summer 2027 programs", ["intern"], ["summer 2027"]
+            )
+            is None
+        )
 
 
 class TestGetDiffSnippet:
@@ -222,7 +259,7 @@ class TestPollCompany:
         assert isinstance(payload, AlertPayload)
         assert payload.company == "TestCo"
         assert payload.url == company.url
-        assert payload.trigger_keyword == "intern"
+        assert payload.trigger_keyword == "2027"
         assert payload.diff_snippet.startswith("New: ")
         assert payload.pending_hash
         assert state.alert_count == 2
@@ -321,7 +358,8 @@ class TestPollHtmlJobs:
         return CompanyConfig(
             name="Palantir",
             url="https://jobs.lever.co/palantir?commitment=Internship",
-            keywords=["intern", "summer 2027", "internship"],
+            level_keywords=INTERN_LEVEL_KEYWORDS,
+            cycle_keywords=INTERN_CYCLE_KEYWORDS,
             enabled=True,
         )
 
@@ -372,7 +410,7 @@ class TestPollHtmlJobs:
         assert len(result) == 1
         payload = result[0]
         assert payload.job_title == "Software Engineering Intern - Summer 2027"
-        assert payload.trigger_keyword in {"intern", "summer 2027", "internship"}
+        assert payload.trigger_keyword == "summer 2027"
         assert payload.notification_keywords
         lowered = {term.lower() for term in payload.notification_keywords}
         assert "python" in lowered or "fastapi" in lowered
@@ -400,7 +438,8 @@ class TestPollPerJobBoard:
         return CompanyConfig(
             name="Waymo",
             url="https://boards-api.greenhouse.io/v1/boards/waymo/jobs?content=true",
-            keywords=["intern", "2027"],
+            level_keywords=INTERN_LEVEL_KEYWORDS,
+            cycle_keywords=INTERN_CYCLE_KEYWORDS,
             enabled=True,
         )
 
@@ -521,7 +560,8 @@ class TestPollWorkdayBoard:
                 "https://salesforce.wd12.myworkdayjobs.com/wday/cxs/salesforce/"
                 "External_Career_Site/jobs?searchText=internship"
             ),
-            keywords=["intern", "internship"],
+            level_keywords=INTERN_LEVEL_KEYWORDS,
+            cycle_keywords=INTERN_CYCLE_KEYWORDS,
             enabled=True,
         )
 
@@ -797,7 +837,7 @@ MICROSOFT_BOARD_JSON = json.dumps(
         "positions": [
             {
                 "id": 1970393556864498,
-                "name": "Software Engineering Intern - AI Frontiers",
+                "name": "Software Engineering Intern - AI Frontiers - Summer 2027",
                 "department": "Applied Sciences",
                 "locations": ["United States, Washington, Redmond"],
                 "positionUrl": "/careers/job/1970393556864498",
@@ -951,7 +991,7 @@ class TestFetchMicrosoft:
 
     def test_extract_text_from_microsoft_json(self, scraper: CareerPageScraper) -> None:
         text = scraper.extract_text(MICROSOFT_BOARD_JSON, MICROSOFT_URL)
-        assert "software engineering intern - ai frontiers" in text
+        assert "software engineering intern - ai frontiers - summer 2027" in text
         assert "applied sciences" in text
 
 
@@ -961,7 +1001,8 @@ class TestPollMicrosoftBoard:
         return CompanyConfig(
             name="Microsoft",
             url=MICROSOFT_URL,
-            keywords=["internship", "engineering intern", "summer 2027"],
+            level_keywords=STRICT_INTERN_LEVEL_KEYWORDS,
+            cycle_keywords=INTERN_CYCLE_KEYWORDS,
             enabled=True,
         )
 
@@ -1017,4 +1058,6 @@ class TestPollMicrosoftBoard:
             result = profiled_scraper.poll_company(microsoft_company, state)
 
         assert len(result) == 1
-        assert result[0].job_title == "Software Engineering Intern - AI Frontiers"
+        assert result[0].job_title == (
+            "Software Engineering Intern - AI Frontiers - Summer 2027"
+        )

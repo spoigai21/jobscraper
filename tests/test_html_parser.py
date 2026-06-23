@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from monitor.companies import INTERN_CYCLE_KEYWORDS, INTERN_LEVEL_KEYWORDS
 from monitor.notification_keywords import select_notification_keywords
-from monitor.parsers.boards import job_matches_keyword
+from monitor.parsers.boards import job_matches_keyword, job_matches_level_and_cycle
 from monitor.parsers.html import parse_html_jobs
 from monitor.profile import load_profile
 
@@ -79,9 +80,13 @@ class TestParseHtmlJobs:
 class TestHtmlKeywordExtraction:
     def test_lever_job_matches_cycle_and_level_keywords(self) -> None:
         jobs = parse_html_jobs(_LEVER_HTML, "https://jobs.lever.co/palantir", "Palantir")
-        keywords = ["summer 2027", "intern", "internship"]
 
-        assert job_matches_keyword(jobs[0], keywords) == "summer 2027"
+        assert (
+            job_matches_level_and_cycle(
+                jobs[0], INTERN_LEVEL_KEYWORDS, INTERN_CYCLE_KEYWORDS
+            )
+            == "summer 2027"
+        )
         assert job_matches_keyword(jobs[0], ["intern"]) == "intern"
 
     def test_notification_keywords_include_cycle_and_tech(self) -> None:

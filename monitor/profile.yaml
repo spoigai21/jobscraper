@@ -164,9 +164,11 @@ prestige:
     - Pinterest
     - SpaceX
     - Cloudflare
-  tier_b:
+    tier_b:
+    - Bloomberg
     - Zoox
     - Mobileye
+    - Wing
     - Zipline
     - Skydio
     - Nuro

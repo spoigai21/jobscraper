@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 from monitor.app import run_poll_cycle
+from monitor.companies import INTERN_CYCLE_KEYWORDS, INTERN_LEVEL_KEYWORDS
 from monitor.models import CompanyConfig, StateRecord
 from monitor.scraper import CareerPageScraper
 
@@ -48,7 +49,8 @@ class TestRunPollCycle:
         company = CompanyConfig(
             name="Waymo",
             url="https://boards-api.greenhouse.io/v1/boards/waymo/jobs?content=true",
-            keywords=["intern", "2027"],
+            level_keywords=INTERN_LEVEL_KEYWORDS,
+            cycle_keywords=INTERN_CYCLE_KEYWORDS,
             enabled=True,
         )
         state = StateRecord(
@@ -88,7 +90,8 @@ class TestRunPollCycle:
         company = CompanyConfig(
             name="Waymo",
             url="https://boards-api.greenhouse.io/v1/boards/waymo/jobs?content=true",
-            keywords=["intern", "2027"],
+            level_keywords=INTERN_LEVEL_KEYWORDS,
+            cycle_keywords=INTERN_CYCLE_KEYWORDS,
             enabled=True,
         )
         state = StateRecord(

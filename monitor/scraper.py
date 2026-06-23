@@ -23,8 +23,9 @@ from monitor.config import (
 from monitor.parsers.boards import (
     BoardType,
     detect_board_type,
-    job_matches_keyword,
+    job_matches_level_and_cycle,
     jobs_to_text,
+    match_level_and_cycle_in_text,
     parse_job_board,
 )
 from monitor.parsers.bytedance import fetch_bytedance_search_raw, is_bytedance_jobs_url
@@ -731,16 +732,17 @@ class CareerPageScraper:
         """
         return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
+    def check_level_and_cycle(
+        self,
+        text: str,
+        level_keywords: list[str],
+        cycle_keywords: list[str],
+    ) -> str | None:
+        """Return the matched cycle keyword when both groups match in ``text``."""
+        return match_level_and_cycle_in_text(text, level_keywords, cycle_keywords)
+
     def check_keywords(self, text: str, keywords: list[str]) -> str | None:
-        """Return the first keyword found in ``text`` (case-insensitive).
-
-        Args:
-            text: Normalized page text (typically already lowercased).
-            keywords: Terms to search for, e.g. ``"intern"`` or ``"2027"``.
-
-        Returns:
-            The first matching keyword from ``keywords``, or ``None``.
-        """
+        """Legacy OR matcher for a flat keyword list (HTML diff helpers)."""
         lowered_text = text.lower()
         for keyword in keywords:
             lowered_keyword = keyword.lower()
@@ -869,7 +871,9 @@ class CareerPageScraper:
         now_iso: str,
     ) -> AlertPayload | None:
         """Score a single new job and build an alert payload when it qualifies."""
-        trigger_keyword = job_matches_keyword(job, company.keywords)
+        trigger_keyword = job_matches_level_and_cycle(
+            job, company.level_keywords, company.cycle_keywords
+        )
         if trigger_keyword is None:
             return None
 
@@ -1106,7 +1110,7 @@ class CareerPageScraper:
         HTML fallback: fetch → hash diff → keyword check (legacy path).
 
         Args:
-            company: Company configuration (name, URL, keywords).
+            company: Company configuration (name, URL, level/cycle keywords).
             state: Mutable persisted state for this company.
 
         Returns:
@@ -1168,8 +1172,11 @@ class CareerPageScraper:
                 )
                 return []
 
-            job_snippet = self._find_job_snippet(previous_text, text, company.keywords)
-            matched_keyword = self.check_keywords(text, company.keywords)
+            search_keywords = list(company.all_keywords())
+            job_snippet = self._find_job_snippet(previous_text, text, search_keywords)
+            matched_keyword = self.check_level_and_cycle(
+                text, company.level_keywords, company.cycle_keywords
+            )
             if matched_keyword is None and not self._is_substantial_change(
                 previous_text, text, job_snippet
             ):
@@ -1193,7 +1200,7 @@ class CareerPageScraper:
             diff_snippet = self.get_diff_snippet(
                 previous_text,
                 text,
-                company.keywords,
+                search_keywords,
             )
             trigger_keyword = matched_keyword or "job listing"
             job_title = title_from_diff_snippet(diff_snippet)

@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from monitor.companies import COMPANIES
+from monitor.companies import (
+    COMPANIES,
+    INTERN_CYCLE_KEYWORDS,
+    INTERN_LEVEL_KEYWORDS,
+    intern_cycle_keywords_for_year,
+)
 from monitor.parsers.boards import BoardType, detect_board_type
 
 
@@ -138,6 +143,18 @@ class TestZiplineBoard:
         assert company.enabled is True
 
 
+class TestWingBoard:
+    def test_uses_greenhouse_api(self) -> None:
+        company = _company("Wing")
+
+        assert (
+            company.url
+            == "https://boards-api.greenhouse.io/v1/boards/wing/jobs?content=true"
+        )
+        assert detect_board_type(company.url) == BoardType.GREENHOUSE
+        assert company.enabled is True
+
+
 class TestCloudflareBoard:
     def test_uses_greenhouse_api(self) -> None:
         company = _company("Cloudflare")
@@ -226,3 +243,32 @@ class TestNvidiaBoard:
         )
         assert detect_board_type(company.url) == BoardType.WORKDAY
         assert company.enabled is True
+
+
+class TestBloombergBoard:
+    def test_uses_avature_html_search(self) -> None:
+        company = _company("Bloomberg")
+
+        assert company.url == (
+            "https://bloomberg.avature.net/careers/SearchJobs"
+            "?jobRecordsPerPage=50&jobOffset=0&search=internship"
+        )
+        assert detect_board_type(company.url) == BoardType.HTML
+        assert company.enabled is True
+
+
+class TestInternKeywordConfig:
+    def test_cycle_keywords_include_bridge_and_seasons(self) -> None:
+        cycle = intern_cycle_keywords_for_year(2027)
+        assert "spring 2027" in cycle
+        assert "summer 2027" in cycle
+        assert "fall 2027" in cycle
+        assert "co-op 2027" in cycle
+        assert "2027" in cycle
+        assert "winter 2026" in cycle
+
+    def test_all_companies_use_two_list_keywords(self) -> None:
+        for company in COMPANIES:
+            assert company.level_keywords
+            assert company.cycle_keywords
+            assert company.cycle_keywords == INTERN_CYCLE_KEYWORDS
