@@ -55,6 +55,10 @@ class TestDetectBoardType:
                 BoardType.MICROSOFT,
             ),
             (
+                "https://explore.jobs.netflix.net/api/apply/v2/jobs?domain=netflix.com&query=intern",
+                BoardType.MICROSOFT,
+            ),
+            (
                 "https://www.metacareers.com/jobsearch?q=intern",
                 BoardType.META,
             ),
@@ -66,7 +70,11 @@ class TestDetectBoardType:
                 "https://api.lifeattiktok.com/api/v1/public/supplier/search/job/posts?keywords=intern",
                 BoardType.TIKTOK,
             ),
-            ("https://careers.google.com/jobs", BoardType.HTML),
+            (
+                "https://careers.google.com/jobs/results/?employment_type=INTERN",
+                BoardType.GOOGLE,
+            ),
+            ("https://careers.google.com/jobs", BoardType.GOOGLE),
         ],
     )
     def test_detects_board_from_url(self, url: str, expected: BoardType) -> None:
@@ -290,6 +298,40 @@ class TestParseMicrosoft:
         assert len(jobs) == 3
 
 
+class TestParseNetflix:
+    @pytest.fixture
+    def netflix_json(self) -> dict:
+        return json.loads(
+            (FIXTURES_DIR / "netflix_sample.json").read_text(encoding="utf-8")
+        )
+
+    def test_parses_sample_fixture(self, netflix_json: dict) -> None:
+        board_url = (
+            "https://explore.jobs.netflix.net/api/apply/v2/jobs"
+            "?domain=netflix.com&query=intern"
+        )
+        jobs = parse_microsoft(netflix_json, "Netflix", board_url=board_url)
+
+        assert len(jobs) == 2
+        intern_job = jobs[0]
+        assert intern_job.id == "790315673635"
+        assert intern_job.title.startswith("Video Algorithms Intern")
+        assert intern_job.department == "Engineering"
+        assert intern_job.location == "Los Gatos,California,United States of America"
+        assert intern_job.url == "https://explore.jobs.netflix.net/careers/job/790315673635"
+        assert intern_job.company_name == "Netflix"
+        assert "video algorithms team" in intern_job.description
+
+    def test_routes_to_microsoft_parser(self, netflix_json: dict) -> None:
+        url = (
+            "https://explore.jobs.netflix.net/api/apply/v2/jobs"
+            "?domain=netflix.com&query=intern"
+        )
+        jobs = parse_job_board(netflix_json, url, "Netflix")
+        assert len(jobs) == 2
+        assert jobs[1].url.endswith("/careers/job/790315673636")
+
+
 class TestParseMeta:
     def test_routes_to_meta_parser(self) -> None:
         raw = json.loads(
@@ -299,6 +341,41 @@ class TestParseMeta:
         jobs = parse_job_board(raw, url, "Meta")
         assert len(jobs) == 3
         assert jobs[0].company_name == "Meta"
+
+
+class TestParseAmazon:
+    def test_routes_to_amazon_parser(self) -> None:
+        raw = json.loads(
+            (FIXTURES_DIR / "amazon_sample.json").read_text(encoding="utf-8")
+        )
+        url = (
+            "https://www.amazon.jobs/en/search?base_query=intern&country=USA"
+            "&business_category[]=studentprograms&sort=recent"
+        )
+        jobs = parse_job_board(raw, url, "Amazon")
+        assert len(jobs) == 2
+        assert jobs[0].company_name == "Amazon"
+        assert jobs[0].id == "10435122"
+
+
+class TestParseGoogle:
+    def test_parses_sample_fixture(self) -> None:
+        from monitor.parsers.google import parse_google_html
+
+        html = (FIXTURES_DIR / "google_sample.html").read_text(encoding="utf-8")
+        jobs = parse_google_html(html, "Google")
+
+        assert len(jobs) == 2
+        assert jobs[0].id == "140245524367188678"
+        assert jobs[0].company_name == "Google"
+        assert "Student Researcher" in jobs[0].title
+
+    def test_routes_to_google_parser(self) -> None:
+        html = (FIXTURES_DIR / "google_sample.html").read_text(encoding="utf-8")
+        url = "https://careers.google.com/jobs/results/?employment_type=INTERN"
+        jobs = parse_job_board(html, url, "Google")
+        assert len(jobs) == 2
+        assert jobs[0].id == "140245524367188678"
 
 
 class TestParseJobBoard:

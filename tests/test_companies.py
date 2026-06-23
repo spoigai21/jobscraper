@@ -34,6 +34,52 @@ class TestMetaBoard:
         assert company.enabled is True
 
 
+class TestGoogleBoard:
+    def test_uses_ssr_careers_search(self) -> None:
+        company = _company("Google")
+
+        assert company.url == (
+            "https://careers.google.com/jobs/results/?employment_type=INTERN"
+        )
+        assert detect_board_type(company.url) == BoardType.GOOGLE
+        assert company.enabled is True
+
+
+class TestAmazonBoard:
+    def test_uses_search_json_api(self) -> None:
+        company = _company("Amazon")
+
+        assert company.url == (
+            "https://www.amazon.jobs/en/search?base_query=intern&country=USA"
+            "&business_category[]=studentprograms&sort=recent"
+        )
+        assert detect_board_type(company.url) == BoardType.AMAZON
+        assert company.enabled is True
+
+
+class TestAppleBoard:
+    def test_uses_hydration_search(self) -> None:
+        company = _company("Apple")
+
+        assert company.url == (
+            "https://jobs.apple.com/en-us/search?search=internship&sort=newest"
+        )
+        assert detect_board_type(company.url) == BoardType.APPLE
+        assert company.enabled is True
+
+
+class TestNuroBoard:
+    def test_uses_greenhouse_api(self) -> None:
+        company = _company("Nuro")
+
+        assert (
+            company.url
+            == "https://boards-api.greenhouse.io/v1/boards/nuro/jobs?content=true"
+        )
+        assert detect_board_type(company.url) == BoardType.GREENHOUSE
+        assert company.enabled is True
+
+
 class TestZooxBoard:
     def test_uses_lever_api(self) -> None:
         company = _company("Zoox")
@@ -41,6 +87,18 @@ class TestZooxBoard:
         assert (
             company.url
             == "https://api.lever.co/v0/postings/zoox?commitment=Internship%2FCo-op"
+        )
+        assert detect_board_type(company.url) == BoardType.LEVER
+        assert company.enabled is True
+
+
+class TestPalantirBoard:
+    def test_uses_lever_api(self) -> None:
+        company = _company("Palantir")
+
+        assert (
+            company.url
+            == "https://api.lever.co/v0/postings/palantir?commitment=Internship"
         )
         assert detect_board_type(company.url) == BoardType.LEVER
         assert company.enabled is True
@@ -116,4 +174,30 @@ class TestTikTokBoard:
             "?keywords=intern"
         )
         assert detect_board_type(company.url) == BoardType.TIKTOK
+        assert company.enabled is True
+
+
+class TestNetflixBoard:
+    def test_uses_eightfold_apply_v2_api(self) -> None:
+        company = _company("Netflix")
+
+        assert (
+            company.url
+            == "https://explore.jobs.netflix.net/api/apply/v2/jobs"
+            "?domain=netflix.com&query=intern"
+        )
+        assert detect_board_type(company.url) == BoardType.MICROSOFT
+        assert company.enabled is True
+
+
+class TestNvidiaBoard:
+    def test_uses_workday_api(self) -> None:
+        company = _company("NVIDIA")
+
+        assert (
+            company.url
+            == "https://nvidia.wd5.myworkdayjobs.com/wday/cxs/nvidia/NVIDIAExternalCareerSite/jobs"
+            "?searchText=intern"
+        )
+        assert detect_board_type(company.url) == BoardType.WORKDAY
         assert company.enabled is True

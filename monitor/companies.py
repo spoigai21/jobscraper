@@ -46,8 +46,8 @@ COMPANIES: list[CompanyConfig] = [
     CompanyConfig(
         name="Google",
         url="https://careers.google.com/jobs/results/?employment_type=INTERN",
-        keywords=DEFAULT_KEYWORDS,
-        enabled=False,  # JS-rendered careers search; HTML fetch sees static shell only
+        keywords=FILTERED_INTERN_KEYWORDS,
+        enabled=True,  # SSR embeds intern listings in AF_initDataCallback ds:1
     ),
     CompanyConfig(
         name="Meta",
@@ -57,15 +57,18 @@ COMPANIES: list[CompanyConfig] = [
     ),
     CompanyConfig(
         name="Amazon",
-        url="https://www.amazon.jobs/en/search?base_query=intern",
-        keywords=DEFAULT_KEYWORDS,
-        enabled=False,  # JS-rendered job search; listings not present in raw HTML
+        url=(
+            "https://www.amazon.jobs/en/search?base_query=intern&country=USA"
+            "&business_category[]=studentprograms&sort=recent"
+        ),
+        keywords=FILTERED_INTERN_KEYWORDS,
+        enabled=True,  # search.json API (paginated by offset, result_limit=100)
     ),
     CompanyConfig(
         name="Apple",
-        url="https://jobs.apple.com/en-us/search?search=intern&sort=newest",
+        url="https://jobs.apple.com/en-us/search?search=internship&sort=newest",
         keywords=STRICT_INTERN_KEYWORDS,
-        enabled=False,  # JS-rendered jobs.apple.com search; no scrapeable listings in HTML
+        enabled=True,  # SSR hydration searchResults (paginated GET HTML)
     ),
     CompanyConfig(
         name="OpenAI",
@@ -118,12 +121,7 @@ COMPANIES: list[CompanyConfig] = [
         keywords=FILTERED_INTERN_KEYWORDS,
         enabled=True,
     ),
-    CompanyConfig(
-        name="Luminar",
-        url="https://www.luminartech.com/careers/",
-        keywords=DEFAULT_KEYWORDS,
-        enabled=False,  # /careers/ redirects to a broken page; site is product marketing only
-    ),
+    # REMOVED — Luminar: liquidated Apr 2026; no scrapeable careers board
     # REMOVED — Matterport: redirects to CoStar Group portal — noisy, not Matterport-specific
     CompanyConfig(
         name="SpaceX",
@@ -173,12 +171,7 @@ COMPANIES: list[CompanyConfig] = [
         keywords=FILTERED_INTERN_KEYWORDS,
         enabled=True,  # Greenhouse API; internship-positions page is Squarespace marketing
     ),
-    CompanyConfig(
-        name="Firefly",
-        url="https://fireflyspace.com/careers/",
-        keywords=STRICT_INTERN_KEYWORDS,
-        enabled=False,  # WordPress careers page embeds listings via JS; section is empty in HTML
-    ),
+    # REMOVED — Firefly: WordPress careers page embeds listings via JS
     CompanyConfig(
         name="Muon Space",
         url="https://boards-api.greenhouse.io/v1/boards/muonspace/jobs?content=true",
@@ -191,12 +184,7 @@ COMPANIES: list[CompanyConfig] = [
         keywords=FILTERED_INTERN_KEYWORDS,
         enabled=True,
     ),
-    CompanyConfig(
-        name="Air Space Intelligence",
-        url="https://www.airspace-intelligence.com/careers",
-        keywords=STRICT_INTERN_KEYWORDS,
-        enabled=False,  # Marketing careers page has no scrapeable job listings or intern keywords
-    ),
+    # REMOVED — Air Space Intelligence: marketing careers page, no scrapeable listings
     CompanyConfig(
         name="Scale AI",
         url="https://boards-api.greenhouse.io/v1/boards/scaleai/jobs?content=true",
@@ -205,9 +193,12 @@ COMPANIES: list[CompanyConfig] = [
     ),
     CompanyConfig(
         name="NVIDIA",
-        url="https://jobs.nvidia.com/careers?filter_job_type=intern+%28fixed+term%29",
+        url=(
+            "https://nvidia.wd5.myworkdayjobs.com/wday/cxs/nvidia/NVIDIAExternalCareerSite/jobs"
+            "?searchText=intern"
+        ),
         keywords=FILTERED_INTERN_KEYWORDS,
-        enabled=False,  # SPA careers portal; internship listings require client-side render
+        enabled=True,  # Workday cxs API (jobs.nvidia.com Eightfold SPA is wrong layer)
     ),
     CompanyConfig(
         name="Stripe",
@@ -247,9 +238,12 @@ COMPANIES: list[CompanyConfig] = [
     ),
     CompanyConfig(
         name="Netflix",
-        url="https://api.lever.co/v0/postings/netflix",
+        url=(
+            "https://explore.jobs.netflix.net/api/apply/v2/jobs"
+            "?domain=netflix.com&query=intern"
+        ),
         keywords=FILTERED_INTERN_KEYWORDS,
-        enabled=False,  # Lever API returns []; explore.jobs.netflix.net is JS-rendered
+        enabled=True,  # Eightfold apply v2 API (GET, paginated); Lever board empty
     ),
     CompanyConfig(
         name="LinkedIn",
@@ -310,14 +304,9 @@ COMPANIES: list[CompanyConfig] = [
     ),
     CompanyConfig(
         name="Nuro",
-        url="https://www.nuro.ai/early-career",
-        keywords=[
-            "intern",
-            "internship",
-            "pathfinders",
-            "summer 2027",
-        ],
-        enabled=False,  # Next.js early-career page; listings embedded via JS
+        url="https://boards-api.greenhouse.io/v1/boards/nuro/jobs?content=true",
+        keywords=FILTERED_INTERN_KEYWORDS,
+        enabled=True,
     ),
     CompanyConfig(
         name="Discord",
@@ -406,12 +395,7 @@ COMPANIES: list[CompanyConfig] = [
         keywords=FILTERED_INTERN_KEYWORDS,
         enabled=True,
     ),
-    CompanyConfig(
-        name="NASA",
-        url="https://intern.nasa.gov/ossi/web/public/main/index.cfm",
-        keywords=DEFAULT_KEYWORDS,
-        enabled=False,  # Site blocks automated requests; needs custom scraper
-    ),
+    # REMOVED — NASA: STEM Gateway blocks automated requests
     CompanyConfig(
         name="JPL",
         url="https://www.jpl.nasa.gov/careers/internships/",
@@ -420,9 +404,9 @@ COMPANIES: list[CompanyConfig] = [
     ),
     CompanyConfig(
         name="Palantir",
-        url="https://jobs.lever.co/palantir?commitment=Internship",
+        url="https://api.lever.co/v0/postings/palantir?commitment=Internship",
         keywords=FILTERED_INTERN_KEYWORDS,
-        enabled=False,  # Lever HTML page; no JSON postings endpoint
+        enabled=True,
     ),
     CompanyConfig(
         name="Tesla",

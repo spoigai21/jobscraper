@@ -9,7 +9,10 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from monitor.models import JobPosting
+from monitor.parsers.amazon import is_amazon_jobs_url, parse_amazon
+from monitor.parsers.apple import is_apple_jobs_url, parse_apple
 from monitor.parsers.bytedance import is_bytedance_jobs_url, parse_bytedance
+from monitor.parsers.google import is_google_careers_url, parse_google_html
 from monitor.parsers.meta import is_meta_jobs_url, parse_meta
 from monitor.parsers.tiktok import is_tiktok_jobs_url, parse_tiktok
 
@@ -20,8 +23,11 @@ __all__ = [
     "format_new_jobs_snippet",
     "job_matches_keyword",
     "jobs_to_text",
+    "parse_amazon",
+    "parse_apple",
     "parse_ashby",
     "parse_bytedance",
+    "parse_google_html",
     "parse_greenhouse",
     "parse_job_board",
     "parse_lever",
@@ -41,6 +47,9 @@ class BoardType(str, Enum):
     UBER = "uber"
     MICROSOFT = "microsoft"
     META = "meta"
+    AMAZON = "amazon"
+    APPLE = "apple"
+    GOOGLE = "google"
     BYTEDANCE = "bytedance"
     TIKTOK = "tiktok"
     HTML = "html"
@@ -117,10 +126,16 @@ def detect_board_type(url: str) -> BoardType:
         return BoardType.WORKDAY
     if "uber.com/api/loadsearchjobsresults" in lowered:
         return BoardType.UBER
-    if "/api/pcsx/search" in lowered:
+    if "/api/pcsx/search" in lowered or "/api/apply/v2/jobs" in lowered:
         return BoardType.MICROSOFT
     if is_meta_jobs_url(url):
         return BoardType.META
+    if is_amazon_jobs_url(url):
+        return BoardType.AMAZON
+    if is_apple_jobs_url(url):
+        return BoardType.APPLE
+    if is_google_careers_url(url):
+        return BoardType.GOOGLE
     if is_bytedance_jobs_url(url):
         return BoardType.BYTEDANCE
     if is_tiktok_jobs_url(url):
@@ -308,6 +323,9 @@ def _microsoft_location(job: dict[str, Any]) -> str:
 
 
 def _microsoft_job_url(job: dict[str, Any], board_url: str = "") -> str:
+    canonical_url = job.get("canonicalPositionUrl")
+    if canonical_url:
+        return str(canonical_url)
     public_url = job.get("publicUrl")
     if public_url:
         return str(public_url)
@@ -356,7 +374,9 @@ def parse_microsoft(
         job_id = job.get("id")
         if job_id is None:
             continue
-        description = _strip_html(str(job.get("jobDescription") or ""))
+        description = _strip_html(
+            str(job.get("jobDescription") or job.get("job_description") or "")
+        )
         postings.append(
             JobPosting(
                 id=str(job_id),
@@ -422,6 +442,14 @@ def parse_job_board(
         return parse_microsoft(raw_json, company_name, board_url=url)
     if board_type == BoardType.META:
         return parse_meta(raw_json, company_name)
+    if board_type == BoardType.AMAZON:
+        return parse_amazon(raw_json, company_name)
+    if board_type == BoardType.APPLE:
+        return parse_apple(raw_json, company_name)
+    if board_type == BoardType.GOOGLE:
+        if isinstance(raw_json, str):
+            return parse_google_html(raw_json, company_name)
+        return []
     if board_type == BoardType.BYTEDANCE:
         return parse_bytedance(raw_json, company_name)
     if board_type == BoardType.TIKTOK:

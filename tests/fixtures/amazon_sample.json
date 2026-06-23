@@ -1,0 +1,34 @@
+{
+  "error": null,
+  "hits": 2,
+  "jobs": [
+    {
+      "id_icims": "10435122",
+      "title": "2027 Tax Intern (Summer Internship)",
+      "job_path": "/en/jobs/10435122/2027-tax-intern-summer-internship",
+      "city": "Seattle",
+      "state": "WA",
+      "country_code": "USA",
+      "normalized_location": "Seattle, Washington, USA",
+      "location": "US, WA, Seattle",
+      "job_category": "Finance & Accounting",
+      "job_family": "Tax",
+      "business_category": "studentprograms",
+      "description_short": "Tax internship in Seattle for accounting students graduating 2027-2028."
+    },
+    {
+      "id_icims": "10435672",
+      "title": "2027 Amazon Finance Rotation Program - Business Unit Finance Intern",
+      "job_path": "/en/jobs/10435672/2027-amazon-finance-rotation-program-business-unit-finance-intern",
+      "city": "Seattle",
+      "state": "WA",
+      "country_code": "USA",
+      "normalized_location": "Seattle, Washington, USA",
+      "location": "US, WA, Seattle",
+      "job_category": "Finance & Accounting",
+      "job_family": "Finance/planning",
+      "business_category": "studentprograms",
+      "description_short": "Finance rotation internship for undergraduates graduating 2027-2028."
+    }
+  ]
+}

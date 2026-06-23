@@ -25,6 +25,9 @@ from monitor.parsers.boards import (
 from monitor.parsers.bytedance import fetch_bytedance_search_raw, is_bytedance_jobs_url
 from monitor.parsers.tiktok import fetch_tiktok_search_raw, is_tiktok_jobs_url
 from monitor.parsers.html import parse_html_jobs
+from monitor.parsers.amazon import fetch_amazon_search_raw, is_amazon_jobs_url
+from monitor.parsers.apple import fetch_apple_search_raw, is_apple_jobs_url
+from monitor.parsers.google import is_google_careers_url
 from monitor.parsers.meta import fetch_meta_search_raw, is_meta_jobs_url
 from monitor.parsers.nasa import is_nasa_company, nasa_jobs_to_text, parse_nasa_html
 from monitor.parsers.tesla import (
@@ -149,6 +152,9 @@ class CareerPageScraper:
             BoardType.WORKDAY,
             BoardType.MICROSOFT,
             BoardType.META,
+            BoardType.AMAZON,
+            BoardType.APPLE,
+            BoardType.GOOGLE,
             BoardType.BYTEDANCE,
             BoardType.TIKTOK,
         )
@@ -179,6 +185,7 @@ class CareerPageScraper:
                 "/wday/cxs/",
                 "uber.com/api/loadsearchjobsresults",
                 "/api/pcsx/search",
+                "/api/apply/v2/jobs",
                 "jobs.bytedance.com/api/v1/search/job/posts",
                 "api.lifeattiktok.com",
             )
@@ -201,8 +208,9 @@ class CareerPageScraper:
         return values[0]
 
     @staticmethod
-    def _is_microsoft_pcsx_url(url: str) -> bool:
-        return "/api/pcsx/search" in url.lower()
+    def _is_eightfold_jobs_url(url: str) -> bool:
+        lowered = url.lower()
+        return "/api/pcsx/search" in lowered or "/api/apply/v2/jobs" in lowered
 
     @staticmethod
     def _microsoft_search_query(url: str) -> str:
@@ -312,7 +320,7 @@ class CareerPageScraper:
         )
 
     def _fetch_microsoft(self, url: str, headers: dict[str, str]) -> str:
-        """Paginate Microsoft Eightfold PCSX job search and return aggregated JSON."""
+        """Paginate Eightfold PCSX/apply v2 job search and return aggregated JSON."""
         parsed = urlparse(url.split("?", 1)[0])
         request_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
         domain = self._microsoft_domain(url)
@@ -346,11 +354,17 @@ class CareerPageScraper:
             response.raise_for_status()
             data = response.json()
 
-            batch = data.get("data", {}).get("positions") or []
+            batch = data.get("positions")
+            if not isinstance(batch, list):
+                batch = data.get("data", {}).get("positions") or []
             if total is None:
-                nested_total = data.get("data", {}).get("count")
-                if isinstance(nested_total, int):
-                    total = nested_total
+                top_total = data.get("count")
+                if isinstance(top_total, int):
+                    total = top_total
+                else:
+                    nested_total = data.get("data", {}).get("count")
+                    if isinstance(nested_total, int):
+                        total = nested_total
 
             if not batch:
                 break
@@ -407,10 +421,19 @@ class CareerPageScraper:
         elif "uber.com/api/loadsearchjobsresults" in lowered_url:
             jobs = parse_job_board(raw, url, "")
             return jobs_to_text(jobs)
-        elif "/api/pcsx/search" in lowered_url:
+        elif "/api/pcsx/search" in lowered_url or "/api/apply/v2/jobs" in lowered_url:
             jobs = parse_job_board(raw, url, "")
             return jobs_to_text(jobs)
         elif is_meta_jobs_url(url):
+            jobs = parse_job_board(raw, url, "")
+            return jobs_to_text(jobs)
+        elif is_amazon_jobs_url(url):
+            jobs = parse_job_board(raw, url, "")
+            return jobs_to_text(jobs)
+        elif is_apple_jobs_url(url):
+            jobs = parse_job_board(raw, url, "")
+            return jobs_to_text(jobs)
+        elif is_google_careers_url(url):
             jobs = parse_job_board(raw, url, "")
             return jobs_to_text(jobs)
         elif is_bytedance_jobs_url(url):
@@ -445,7 +468,7 @@ class CareerPageScraper:
                     return self._fetch_workday(url, headers, request_url)
                 if self._is_uber_jobs_api_url(url):
                     return self._fetch_uber(url, headers)
-                if self._is_microsoft_pcsx_url(url):
+                if self._is_eightfold_jobs_url(url):
                     return self._fetch_microsoft(url, headers)
                 if is_meta_jobs_url(url):
                     return fetch_meta_search_raw(
@@ -453,6 +476,27 @@ class CareerPageScraper:
                         user_agent=self._settings.user_agent,
                         timeout=self._settings.request_timeout,
                     )
+                if is_amazon_jobs_url(url):
+                    return fetch_amazon_search_raw(
+                        url,
+                        user_agent=self._settings.user_agent,
+                        timeout=self._settings.request_timeout,
+                    )
+                if is_apple_jobs_url(url):
+                    return fetch_apple_search_raw(
+                        url,
+                        user_agent=self._settings.user_agent,
+                        timeout=self._settings.request_timeout,
+                    )
+                if is_google_careers_url(url):
+                    response = requests.get(
+                        url,
+                        headers=headers,
+                        timeout=self._settings.request_timeout,
+                        allow_redirects=True,
+                    )
+                    response.raise_for_status()
+                    return response.text
                 if is_bytedance_jobs_url(url):
                     return fetch_bytedance_search_raw(
                         url,
