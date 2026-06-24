@@ -6,6 +6,8 @@ from monitor.companies import (
     COMPANIES,
     INTERN_CYCLE_KEYWORDS,
     INTERN_LEVEL_KEYWORDS,
+    SPACEX_INTERN_LEVEL_KEYWORDS,
+    STRICT_INTERN_LEVEL_KEYWORDS,
     intern_cycle_keywords_for_year,
 )
 from monitor.parsers.boards import BoardType, detect_board_type
@@ -50,6 +52,15 @@ class TestGoogleBoard:
         assert company.enabled is True
 
 
+class TestHubSpotBoard:
+    def test_uses_careers_graphql_api(self) -> None:
+        company = _company("HubSpot")
+
+        assert company.url == "https://wtcfns.hubspot.com/careers/graphql"
+        assert detect_board_type(company.url) == BoardType.HUBSPOT
+        assert company.enabled is True
+
+
 class TestAmazonBoard:
     def test_uses_search_json_api(self) -> None:
         company = _company("Amazon")
@@ -85,6 +96,18 @@ class TestNuroBoard:
         assert company.enabled is True
 
 
+class TestNeuralinkBoard:
+    def test_uses_greenhouse_api(self) -> None:
+        company = _company("Neuralink")
+
+        assert (
+            company.url
+            == "https://boards-api.greenhouse.io/v1/boards/neuralink/jobs?content=true"
+        )
+        assert detect_board_type(company.url) == BoardType.GREENHOUSE
+        assert company.enabled is True
+
+
 class TestZooxBoard:
     def test_uses_lever_api(self) -> None:
         company = _company("Zoox")
@@ -105,6 +128,15 @@ class TestPalantirBoard:
             company.url
             == "https://api.lever.co/v0/postings/palantir?commitment=Internship"
         )
+        assert detect_board_type(company.url) == BoardType.LEVER
+        assert company.enabled is True
+
+
+class TestShieldAIBoard:
+    def test_uses_lever_api(self) -> None:
+        company = _company("Shield AI")
+
+        assert company.url == "https://api.lever.co/v0/postings/shieldai"
         assert detect_board_type(company.url) == BoardType.LEVER
         assert company.enabled is True
 
@@ -232,6 +264,19 @@ class TestNetflixBoard:
         assert company.enabled is True
 
 
+class TestJohnDeereBoard:
+    def test_uses_eightfold_pcsx_api(self) -> None:
+        company = _company("John Deere")
+
+        assert (
+            company.url
+            == "https://careers.deere.com/api/pcsx/search"
+            "?domain=johndeere.com&query=intern"
+        )
+        assert detect_board_type(company.url) == BoardType.MICROSOFT
+        assert company.enabled is True
+
+
 class TestNvidiaBoard:
     def test_uses_workday_api(self) -> None:
         company = _company("NVIDIA")
@@ -272,3 +317,17 @@ class TestInternKeywordConfig:
             assert company.level_keywords
             assert company.cycle_keywords
             assert company.cycle_keywords == INTERN_CYCLE_KEYWORDS
+
+    def test_microsoft_uses_strict_level_keywords(self) -> None:
+        company = _company("Microsoft")
+        assert company.level_keywords == STRICT_INTERN_LEVEL_KEYWORDS
+        assert "intern" not in company.level_keywords
+
+    def test_spacex_uses_custom_level_keywords(self) -> None:
+        company = _company("SpaceX")
+        assert company.level_keywords == SPACEX_INTERN_LEVEL_KEYWORDS
+
+    def test_bloomberg_and_wing_use_standard_level_keywords(self) -> None:
+        for name in ("Bloomberg", "Wing"):
+            company = _company(name)
+            assert company.level_keywords == INTERN_LEVEL_KEYWORDS

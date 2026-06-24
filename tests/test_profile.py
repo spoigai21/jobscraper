@@ -58,6 +58,8 @@ class TestLoadProfile:
         assert profile.prestige.tier_for_company("SpaceX") == "a"
         assert profile.prestige.tier_for_company("Airbnb") == "a"
         assert profile.prestige.tier_for_company("Skydio") == "b"
+        assert profile.prestige.tier_for_company("Bloomberg") == "b"
+        assert profile.prestige.tier_for_company("Wing") == "b"
         assert profile.prestige.tier_for_company("JPL") == "b"
         assert profile.prestige.tier_for_company("Unknown Corp") is None
 

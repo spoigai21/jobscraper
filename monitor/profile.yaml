@@ -163,6 +163,7 @@ prestige:
     - Airbnb
     - Pinterest
     - SpaceX
+    - Neuralink
     - Cloudflare
   tier_b:
     - Bloomberg
@@ -171,6 +172,7 @@ prestige:
     - Wing
     - Zipline
     - Skydio
+    - Shield AI
     - Nuro
     - Rocket Lab
     - Planet Labs
@@ -179,10 +181,12 @@ prestige:
     - Astranis
     - CrowdStrike
     - JPL
+    - John Deere
     - Tesla
   tier_c:
     - Ramp
     - DoorDash
+    - HubSpot
     - Lyft
     - MongoDB
     - Figma

@@ -52,6 +52,13 @@ COMPANIES: list[CompanyConfig] = [
         enabled=True,  # SSR embeds intern listings in AF_initDataCallback ds:1
     ),
     CompanyConfig(
+        name="HubSpot",
+        url="https://wtcfns.hubspot.com/careers/graphql",
+        level_keywords=INTERN_LEVEL_KEYWORDS,
+        cycle_keywords=INTERN_CYCLE_KEYWORDS,
+        enabled=True,  # GraphQL jobs query; Greenhouse board (hubspot) is empty
+    ),
+    CompanyConfig(
         name="Meta",
         url="https://www.metacareers.com/jobsearch?q=intern",
         level_keywords=INTERN_LEVEL_KEYWORDS,
@@ -126,6 +133,13 @@ COMPANIES: list[CompanyConfig] = [
         level_keywords=INTERN_LEVEL_KEYWORDS,
         cycle_keywords=INTERN_CYCLE_KEYWORDS,
         enabled=True,
+    ),
+    CompanyConfig(
+        name="Shield AI",
+        url="https://api.lever.co/v0/postings/shieldai",
+        level_keywords=INTERN_LEVEL_KEYWORDS,
+        cycle_keywords=INTERN_CYCLE_KEYWORDS,
+        enabled=True,  # Lever API; jobs.lever.co/shieldai; commitment filter returns []
     ),
     CompanyConfig(
         name="Zoox",
@@ -286,6 +300,13 @@ COMPANIES: list[CompanyConfig] = [
         level_keywords=INTERN_LEVEL_KEYWORDS,
         cycle_keywords=INTERN_CYCLE_KEYWORDS,
         enabled=True,  # Eightfold apply v2 API (GET, paginated); Lever board empty
+    ),
+    CompanyConfig(
+        name="Neuralink",
+        url="https://boards-api.greenhouse.io/v1/boards/neuralink/jobs?content=true",
+        level_keywords=INTERN_LEVEL_KEYWORDS,
+        cycle_keywords=INTERN_CYCLE_KEYWORDS,
+        enabled=True,
     ),
     CompanyConfig(
         name="LinkedIn",
@@ -477,6 +498,16 @@ COMPANIES: list[CompanyConfig] = [
         level_keywords=STRICT_INTERN_LEVEL_KEYWORDS,
         cycle_keywords=INTERN_CYCLE_KEYWORDS,
         enabled=False,  # NASA site blocks automated fetches (403)
+    ),
+    CompanyConfig(
+        name="John Deere",
+        url=(
+            "https://careers.deere.com/api/pcsx/search"
+            "?domain=johndeere.com&query=intern"
+        ),
+        level_keywords=INTERN_LEVEL_KEYWORDS,
+        cycle_keywords=INTERN_CYCLE_KEYWORDS,
+        enabled=True,  # Eightfold PCSX search API (careers.deere.com SPA front-end)
     ),
     CompanyConfig(
         name="Palantir",

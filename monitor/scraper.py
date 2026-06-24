@@ -34,6 +34,7 @@ from monitor.parsers.html import parse_html_jobs
 from monitor.parsers.amazon import fetch_amazon_search_raw, is_amazon_jobs_url
 from monitor.parsers.apple import fetch_apple_search_raw, is_apple_jobs_url
 from monitor.parsers.google import fetch_google_search_raw, is_google_careers_url
+from monitor.parsers.hubspot import fetch_hubspot_jobs_raw, is_hubspot_jobs_url
 from monitor.parsers.meta import fetch_meta_search_raw, is_meta_jobs_url
 from monitor.parsers.nasa import is_nasa_company, nasa_jobs_to_text, parse_nasa_html
 from monitor.parsers.tesla import (
@@ -185,6 +186,7 @@ class CareerPageScraper:
             BoardType.GOOGLE,
             BoardType.BYTEDANCE,
             BoardType.TIKTOK,
+            BoardType.HUBSPOT,
         )
 
     @staticmethod
@@ -606,6 +608,9 @@ class CareerPageScraper:
         elif is_tiktok_jobs_url(url):
             jobs = parse_job_board(raw, url, "")
             return jobs_to_text(jobs)
+        elif is_hubspot_jobs_url(url):
+            jobs = parse_job_board(raw, url, "")
+            return jobs_to_text(jobs)
 
         return " ".join(part for part in parts if part).lower()
 
@@ -680,6 +685,12 @@ class CareerPageScraper:
                     )
                 if is_tiktok_jobs_url(url):
                     return fetch_tiktok_search_raw(
+                        url,
+                        user_agent=self._settings.user_agent,
+                        timeout=self._settings.request_timeout,
+                    )
+                if is_hubspot_jobs_url(url):
+                    return fetch_hubspot_jobs_raw(
                         url,
                         user_agent=self._settings.user_agent,
                         timeout=self._settings.request_timeout,

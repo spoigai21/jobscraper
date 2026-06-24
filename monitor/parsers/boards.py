@@ -13,6 +13,7 @@ from monitor.parsers.amazon import is_amazon_jobs_url, parse_amazon
 from monitor.parsers.apple import is_apple_jobs_url, parse_apple
 from monitor.parsers.bytedance import is_bytedance_jobs_url, parse_bytedance
 from monitor.parsers.google import is_google_careers_url, parse_google, parse_google_html
+from monitor.parsers.hubspot import is_hubspot_jobs_url, parse_hubspot
 from monitor.parsers.meta import is_meta_jobs_url, parse_meta
 from monitor.parsers.tiktok import is_tiktok_jobs_url, parse_tiktok
 
@@ -32,6 +33,7 @@ __all__ = [
     "parse_google",
     "parse_google_html",
     "parse_greenhouse",
+    "parse_hubspot",
     "parse_job_board",
     "parse_lever",
     "parse_meta",
@@ -55,6 +57,7 @@ class BoardType(str, Enum):
     GOOGLE = "google"
     BYTEDANCE = "bytedance"
     TIKTOK = "tiktok"
+    HUBSPOT = "hubspot"
     HTML = "html"
     UNKNOWN = "unknown"
 
@@ -143,6 +146,8 @@ def detect_board_type(url: str) -> BoardType:
         return BoardType.BYTEDANCE
     if is_tiktok_jobs_url(url):
         return BoardType.TIKTOK
+    if is_hubspot_jobs_url(url):
+        return BoardType.HUBSPOT
     if url.startswith(("http://", "https://")):
         return BoardType.HTML
     return BoardType.UNKNOWN
@@ -465,6 +470,8 @@ def parse_job_board(
         return parse_bytedance(raw_json, company_name)
     if board_type == BoardType.TIKTOK:
         return parse_tiktok(raw_json, company_name)
+    if board_type == BoardType.HUBSPOT:
+        return parse_hubspot(raw_json, company_name)
     return []
 
 
