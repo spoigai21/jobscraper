@@ -216,11 +216,9 @@ alerts:
   standard:
     channels:
       - push
-      - email
+      - sms
   high:
     score_threshold: 7
     channels:
       - push
-      - call
       - sms
-      - email
