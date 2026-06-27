@@ -23,6 +23,11 @@ from monitor.parsers.meta import (
     is_meta_jobs_url,
 )
 from monitor.parsers.html import parse_html_jobs
+from monitor.parsers.simplify import (
+    is_simplify_url,
+    parse_simplify,
+    simplify_listings_url,
+)
 from monitor.parsers.nasa import (
     is_nasa_company,
     nasa_jobs_to_text,
@@ -44,6 +49,7 @@ __all__ = [
     "is_meta_company",
     "is_meta_jobs_url",
     "is_nasa_company",
+    "is_simplify_url",
     "is_tesla_company",
     "job_matches_keyword",
     "job_matches_level_and_cycle",
@@ -58,7 +64,9 @@ __all__ = [
     "parse_meta",
     "parse_microsoft",
     "parse_nasa_html",
+    "parse_simplify",
     "parse_tesla_state",
+    "simplify_listings_url",
     "parse_uber",
     "parse_workday",
     "tesla_jobs_to_text",

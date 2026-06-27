@@ -187,6 +187,7 @@ class CareerPageScraper:
             BoardType.BYTEDANCE,
             BoardType.TIKTOK,
             BoardType.HUBSPOT,
+            BoardType.SIMPLIFY,
         )
 
     @staticmethod
@@ -246,6 +247,7 @@ class CareerPageScraper:
                 "/api/apply/v2/jobs",
                 "jobs.bytedance.com/api/v1/search/job/posts",
                 "api.lifeattiktok.com",
+                "raw.githubusercontent.com/simplifyjobs",
             )
         )
 
