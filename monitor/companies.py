@@ -6,14 +6,17 @@ from monitor.models import CompanyConfig
 from monitor.parsers.simplify import simplify_listings_url
 
 def intern_cycle_keywords_for_year(year: int) -> list[str]:
-    """Seasonal phrases, bare year, and prior-winter bridge for target cycle."""
+    """Seasonal phrases and bare year for the target cycle, plus prior-fall and
+    both winter bridges (e.g. fall 2026 / winter 2026 / winter 2027 for 2027)."""
     return [
         f"spring {year}",
         f"summer {year}",
         f"fall {year}",
         f"co-op {year}",
         str(year),
+        f"fall {year - 1}",
         f"winter {year - 1}",
+        f"winter {year}",
     ]
 
 
