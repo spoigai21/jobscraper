@@ -20,9 +20,23 @@ def intern_cycle_keywords_for_year(year: int) -> list[str]:
     ]
 
 
-# Target internship cycle; keeps cycle keywords and the Simplify feed in sync.
-INTERN_CYCLE_YEAR: int = 2027
-INTERN_CYCLE_KEYWORDS: list[str] = intern_cycle_keywords_for_year(INTERN_CYCLE_YEAR)
+def intern_cycle_keywords_for_years(years: list[int]) -> list[str]:
+    """Union of per-year cycle keywords across multiple cycles, de-duplicated
+    while preserving order."""
+    seen: set[str] = set()
+    keywords: list[str] = []
+    for year in years:
+        for keyword in intern_cycle_keywords_for_year(year):
+            if keyword not in seen:
+                seen.add(keyword)
+                keywords.append(keyword)
+    return keywords
+
+
+# Target internship cycles; keeps cycle keywords and the Simplify feeds in sync.
+# Track both the active cycle (2026) and the early-bird next cycle (2027).
+INTERN_CYCLE_YEARS: list[int] = [2026, 2027]
+INTERN_CYCLE_KEYWORDS: list[str] = intern_cycle_keywords_for_years(INTERN_CYCLE_YEARS)
 
 INTERN_LEVEL_KEYWORDS: list[str] = [
     "intern",
@@ -539,13 +553,18 @@ COMPANIES: list[CompanyConfig] = [
         cycle_keywords=INTERN_CYCLE_KEYWORDS,
         enabled=True,  # ATSX supplier POST API (lifeattiktok.com careers search)
     ),
-    CompanyConfig(
-        name="Simplify",
-        url=simplify_listings_url(INTERN_CYCLE_YEAR),
-        level_keywords=INTERN_LEVEL_KEYWORDS,
-        cycle_keywords=INTERN_CYCLE_KEYWORDS,
-        # Aggregator feed (SimplifyJobs/Summer<year>-Internships listings.json).
-        # 404s silently until the target-year repo launches, then auto-activates.
-        enabled=True,
-    ),
+    # Aggregator feeds (SimplifyJobs/Summer<year>-Internships listings.json),
+    # one per tracked cycle. A year's feed 404s silently until that repo
+    # launches, then auto-activates. Distinct names keep their poll state
+    # separate in the store.
+    *[
+        CompanyConfig(
+            name=f"Simplify {year}",
+            url=simplify_listings_url(year),
+            level_keywords=INTERN_LEVEL_KEYWORDS,
+            cycle_keywords=INTERN_CYCLE_KEYWORDS,
+            enabled=True,
+        )
+        for year in INTERN_CYCLE_YEARS
+    ],
 ]

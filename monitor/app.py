@@ -41,8 +41,11 @@ def _load_user_profile() -> UserProfile | None:
 
 def get_poll_interval(settings: Settings | None = None) -> int:
     settings = settings or get_settings()
-    hour = datetime.now(EASTERN).hour
-    if settings.business_hours_start <= hour < settings.business_hours_end:
+    now = datetime.now(EASTERN)
+    # On weekends, poll at the slower overnight cadence all day long.
+    if now.weekday() >= 5:  # Saturday=5, Sunday=6
+        return settings.poll_interval_overnight
+    if settings.business_hours_start <= now.hour < settings.business_hours_end:
         return settings.poll_interval_business
     return settings.poll_interval_overnight
 

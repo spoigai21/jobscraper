@@ -493,7 +493,9 @@ def jobs_to_text(jobs: list[JobPosting]) -> str:
 
 def _text_matches_keyword(text: str, keyword: str) -> bool:
     lowered_keyword = keyword.lower()
-    if lowered_keyword in {"intern", "2027"}:
+    # Word-boundary match for "intern" and any bare 4-digit year so a year like
+    # 2026 doesn't substring-match inside unrelated digits (e.g. a job id).
+    if lowered_keyword == "intern" or lowered_keyword.isdigit():
         return bool(re.search(rf"\b{re.escape(lowered_keyword)}\b", text))
     return lowered_keyword in text
 
