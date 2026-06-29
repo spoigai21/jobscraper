@@ -553,6 +553,60 @@ COMPANIES: list[CompanyConfig] = [
         cycle_keywords=INTERN_CYCLE_KEYWORDS,
         enabled=True,  # ATSX supplier POST API (lifeattiktok.com careers search)
     ),
+    # --- Expanded coverage (added 2026-06-29) ---
+    # (display name, board API URL). Board type is auto-detected from the URL
+    # (Greenhouse / Ashby / Lever). Every board below was verified to return a
+    # live listing at add time.
+    *[
+        CompanyConfig(
+            name=name,
+            url=url,
+            level_keywords=INTERN_LEVEL_KEYWORDS,
+            cycle_keywords=INTERN_CYCLE_KEYWORDS,
+            enabled=True,
+        )
+        for name, url in [
+            # AI / ML labs & startups
+            ("xAI", "https://boards-api.greenhouse.io/v1/boards/xai/jobs?content=true"),
+            ("Perplexity", "https://api.ashbyhq.com/posting-api/job-board/perplexity"),
+            ("Cohere", "https://api.ashbyhq.com/posting-api/job-board/cohere"),
+            ("Anysphere (Cursor)", "https://api.ashbyhq.com/posting-api/job-board/cursor"),
+            ("ElevenLabs", "https://api.ashbyhq.com/posting-api/job-board/elevenlabs"),
+            ("Glean", "https://boards-api.greenhouse.io/v1/boards/gleanwork/jobs?content=true"),
+            ("Sierra", "https://api.ashbyhq.com/posting-api/job-board/sierra"),
+            ("Harvey", "https://api.ashbyhq.com/posting-api/job-board/harvey"),
+            ("Mistral", "https://api.lever.co/v0/postings/mistral"),
+            ("Runway", "https://api.ashbyhq.com/posting-api/job-board/runway"),
+            # Big tech / established
+            ("Roblox", "https://boards-api.greenhouse.io/v1/boards/roblox/jobs?content=true"),
+            ("Dropbox", "https://boards-api.greenhouse.io/v1/boards/dropbox/jobs?content=true"),
+            ("Asana", "https://boards-api.greenhouse.io/v1/boards/asana/jobs?content=true"),
+            ("Spotify", "https://api.lever.co/v0/postings/spotify"),
+            ("Twitch", "https://boards-api.greenhouse.io/v1/boards/twitch/jobs?content=true"),
+            # Quant / fintech / trading
+            ("Jane Street", "https://boards-api.greenhouse.io/v1/boards/janestreet/jobs?content=true"),
+            ("IMC Trading", "https://boards-api.greenhouse.io/v1/boards/imc/jobs?content=true"),
+            ("Jump Trading", "https://boards-api.greenhouse.io/v1/boards/jumptrading/jobs?content=true"),
+            ("DRW", "https://boards-api.greenhouse.io/v1/boards/drweng/jobs?content=true"),
+            ("Akuna Capital", "https://boards-api.greenhouse.io/v1/boards/akunacapital/jobs?content=true"),
+            ("Five Rings", "https://boards-api.greenhouse.io/v1/boards/fiveringsllc/jobs?content=true"),
+            ("Block (Square)", "https://boards-api.greenhouse.io/v1/boards/block/jobs?content=true"),
+            ("Affirm", "https://boards-api.greenhouse.io/v1/boards/affirm/jobs?content=true"),
+            ("Chime", "https://boards-api.greenhouse.io/v1/boards/chime/jobs?content=true"),
+            # Mid-tech
+            ("Verkada", "https://boards-api.greenhouse.io/v1/boards/verkada/jobs?content=true"),
+            ("Samsara", "https://boards-api.greenhouse.io/v1/boards/samsara/jobs?content=true"),
+            ("Twilio", "https://boards-api.greenhouse.io/v1/boards/twilio/jobs?content=true"),
+            ("GitLab", "https://boards-api.greenhouse.io/v1/boards/gitlab/jobs?content=true"),
+            ("Vercel", "https://boards-api.greenhouse.io/v1/boards/vercel/jobs?content=true"),
+            ("Gusto", "https://boards-api.greenhouse.io/v1/boards/gusto/jobs?content=true"),
+            ("Benchling", "https://api.ashbyhq.com/posting-api/job-board/benchling"),
+            ("Airtable", "https://boards-api.greenhouse.io/v1/boards/airtable/jobs?content=true"),
+            ("Postman", "https://boards-api.greenhouse.io/v1/boards/postman/jobs?content=true"),
+            ("Webflow", "https://boards-api.greenhouse.io/v1/boards/webflow/jobs?content=true"),
+            ("Coursera", "https://boards-api.greenhouse.io/v1/boards/coursera/jobs?content=true"),
+        ]
+    ],
     # Aggregator feeds (SimplifyJobs/Summer<year>-Internships listings.json),
     # one per tracked cycle. A year's feed 404s silently until that repo
     # launches, then auto-activates. Distinct names keep their poll state
