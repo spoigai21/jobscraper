@@ -353,6 +353,11 @@ def _searchable_text(job: JobPosting) -> str:
     return " ".join(part for part in parts if part).lower()
 
 
+# Hourly pay-rate expressions like "$47/hr" must not be read as the
+# Human-Resources role term "hr" during exclusion matching.
+_PAY_RATE_RE = re.compile(r"\$?\d[\d,.]*\s*/\s*hr\b")
+
+
 def _title_text(job: JobPosting) -> str:
     return job.title.lower()
 
@@ -458,7 +463,7 @@ def _location_matches_profile(location: str, profile: UserProfile) -> bool:
 
 def should_exclude(job: JobPosting, profile: UserProfile) -> bool:
     """Return True when a posting should be dropped before alerting."""
-    text = _searchable_text(job)
+    text = _PAY_RATE_RE.sub(" ", _searchable_text(job))
 
     for term in profile.roles_exclude:
         if _contains_term(text, term):

@@ -112,6 +112,24 @@ class TestExclusions:
 
         assert should_exclude(job, profile)
 
+    def test_hourly_wage_not_read_as_hr_role(self, profile) -> None:
+        job = _job(
+            title="Software Engineer Intern",
+            department="Engineering",
+            description="Summer 2027 SWE internship paying $47/hr in Python.",
+        )
+
+        assert not should_exclude(job, profile)
+
+    def test_actual_hr_role_still_excluded(self, profile) -> None:
+        job = _job(
+            title="HR Intern",
+            department="Human Resources",
+            description="Support recruiting and people operations for summer 2027.",
+        )
+
+        assert should_exclude(job, profile)
+
     def test_phd_intern_excluded(self, profile) -> None:
         job = _job(
             title="Research Intern",
