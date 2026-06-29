@@ -41,7 +41,7 @@ def tiktok_search_keyword(url: str) -> str:
 def _tiktok_job_url(job: dict[str, Any]) -> str:
     job_id = job.get("id")
     if job_id is not None:
-        return f"{TIKTOK_CAREERS_BASE}/position/{job_id}"
+        return f"{TIKTOK_CAREERS_BASE}/position/{job_id}/detail"
     return ""
 
 

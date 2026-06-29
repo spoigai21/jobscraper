@@ -250,6 +250,34 @@ class TestParseByteDance:
         assert jobs[0].title == "Machine Learning Intern"
 
 
+class TestParseTikTok:
+    def test_builds_detail_url(self) -> None:
+        from monitor.parsers.tiktok import parse_tiktok
+
+        raw = {
+            "data": {
+                "job_post_list": [
+                    {
+                        "id": "7655592179645991173",
+                        "code": "A96313A",
+                        "title": "Content Quality and Evaluation Specialist Graduate",
+                        "description": "Evaluate AI data services.",
+                        "job_category": {"en_name": "Data"},
+                        "city_info": {"en_name": "Singapore"},
+                    }
+                ]
+            }
+        }
+        jobs = parse_tiktok(raw, "TikTok")
+
+        assert len(jobs) == 1
+        # lifeattiktok.com only renders the job under the /detail path.
+        assert (
+            jobs[0].url
+            == "https://lifeattiktok.com/position/7655592179645991173/detail"
+        )
+
+
 class TestParseMicrosoft:
     @pytest.fixture
     def microsoft_json(self) -> dict:
