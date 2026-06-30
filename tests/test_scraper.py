@@ -654,6 +654,65 @@ class TestPollWorkdayBoard:
         assert result.alerts == ()
         assert set(json.loads(state.seen_job_ids)) == {"JR501", "JR777"}
 
+    @staticmethod
+    def _board_with_intern_jobs(count: int) -> str:
+        return json.dumps(
+            {
+                "total": count,
+                "jobPostings": [
+                    {
+                        "title": f"Software Engineering Intern Summer 2027 #{i}",
+                        "externalPath": f"/job/California/SWE-Intern_JR{600 + i}",
+                        "locationsText": "California - San Francisco",
+                        "bulletFields": [f"JR{600 + i}"],
+                    }
+                    for i in range(count)
+                ],
+            }
+        )
+
+    def _seeded_state(self, url: str) -> StateRecord:
+        return StateRecord(
+            company="Salesforce",
+            url=url,
+            last_hash="seeded",
+            last_checked="",
+            last_alerted=(
+                datetime.now(timezone.utc) - timedelta(seconds=7200)
+            ).isoformat(),
+            alert_count=0,
+            seen_job_ids='["JR999"]',
+        )
+
+    def test_no_cap_by_default_alerts_all_new_jobs(
+        self,
+        workday_company: CompanyConfig,
+    ) -> None:
+        scraper = CareerPageScraper(_test_settings(), load_profile())
+        state = self._seeded_state(workday_company.url)
+        board = self._board_with_intern_jobs(8)
+
+        with patch.object(scraper, "fetch", return_value=board):
+            result = scraper.poll_company(workday_company, state)
+
+        assert len(result.alerts) == 8
+
+    def test_explicit_cap_limits_alerts_per_cycle(
+        self,
+        workday_company: CompanyConfig,
+    ) -> None:
+        scraper = CareerPageScraper(
+            _test_settings(max_alerts_per_company_per_cycle=3),
+            load_profile(),
+        )
+        state = self._seeded_state(workday_company.url)
+        board = self._board_with_intern_jobs(8)
+
+        with patch.object(scraper, "fetch", return_value=board):
+            result = scraper.poll_company(workday_company, state)
+
+        assert len(result.alerts) == 3
+
 
 WORKDAY_URL = (
     "https://example.wd5.myworkdayjobs.com/wday/cxs/example/ExampleSite/jobs"

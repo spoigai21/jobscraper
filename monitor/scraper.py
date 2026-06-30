@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import re
+import threading
 import time
 from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlparse
@@ -137,8 +138,26 @@ class CareerPageScraper:
         """Initialize the scraper with runtime settings (timeouts, user agent, etc.)."""
         self._settings = settings
         self._profile = profile
-        self._fetch_failure_reason: str | None = None
-        self._last_poll_status: str = "ok"
+        # Per-poll status is held in thread-local storage so concurrent
+        # poll_company calls (POLL_WORKERS > 1) don't clobber each other's
+        # fetch failure reason / status on the shared scraper instance.
+        self._local = threading.local()
+
+    @property
+    def _fetch_failure_reason(self) -> str | None:
+        return getattr(self._local, "fetch_failure_reason", None)
+
+    @_fetch_failure_reason.setter
+    def _fetch_failure_reason(self, value: str | None) -> None:
+        self._local.fetch_failure_reason = value
+
+    @property
+    def _last_poll_status(self) -> str:
+        return getattr(self._local, "last_poll_status", "ok")
+
+    @_last_poll_status.setter
+    def _last_poll_status(self, value: str) -> None:
+        self._local.last_poll_status = value
 
     @property
     def last_poll_status(self) -> str:
@@ -1082,7 +1101,7 @@ class CareerPageScraper:
             return PollResult(closed_jobs=tuple(closed_jobs))
 
         max_alerts = self._settings.max_alerts_per_company_per_cycle
-        if len(alert_payloads) > max_alerts:
+        if max_alerts and len(alert_payloads) > max_alerts:
             logger.warning(
                 "Capping alerts for %s: %d qualifying jobs, sending %d (max %d per cycle)",
                 company.name,

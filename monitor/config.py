@@ -43,7 +43,7 @@ class Settings:
     business_hours_end: int = 19
     request_timeout: int = 15
     min_alert_interval: int = 3600
-    max_alerts_per_company_per_cycle: int = 5
+    max_alerts_per_company_per_cycle: int = 0  # 0 = unlimited (no per-cycle cap)
     user_agent: str = DEFAULT_USER_AGENT
     monitor_db_path: str = str(DEFAULT_DB_PATH)
     health_ping_enabled: bool = True
@@ -83,7 +83,7 @@ def get_settings() -> Settings:
         request_timeout=_env_int("REQUEST_TIMEOUT", 15),
         min_alert_interval=_env_int("MIN_ALERT_INTERVAL", 3600),
         max_alerts_per_company_per_cycle=_env_int(
-            "MAX_ALERTS_PER_COMPANY_PER_CYCLE", 5
+            "MAX_ALERTS_PER_COMPANY_PER_CYCLE", 0
         ),
         user_agent=os.getenv("USER_AGENT") or DEFAULT_USER_AGENT,
         monitor_db_path=os.getenv("MONITOR_DB_PATH") or str(DEFAULT_DB_PATH),
