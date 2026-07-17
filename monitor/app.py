@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -14,7 +15,9 @@ import schedule
 from monitor.alerts import AlertManager
 from monitor.companies import COMPANIES
 from monitor.config import Settings, get_settings, setup_logging
+from monitor.diagnostics import ntfy_reachable, run_network_probe
 from monitor.models import CompanyConfig, PollResult, StateRecord
+from monitor.net import force_ipv4
 from monitor.profile import UserProfile, load_profile
 from monitor.scraper import CareerPageScraper
 from monitor.storage import StateStore, start_time
@@ -26,6 +29,26 @@ _last_health_ping_at: datetime | None = None
 _poll_cycles_since_last_ping = 0
 _last_cycle_companies_checked = 0
 _last_successful_poll_at: datetime | None = None
+
+# Reachability watcher: detects when Railway's egress can reach ntfy.sh again
+# (i.e. ntfy.sh's IP block on our egress IP has lifted). Logs on state change.
+_ntfy_last_reachable: bool | None = None
+_NTFY_REACH_CHECK_INTERVAL = 900  # seconds (15 min)
+
+
+def _watch_ntfy_reachability() -> None:
+    global _ntfy_last_reachable
+    reachable = ntfy_reachable()
+    if reachable and _ntfy_last_reachable is not True:
+        logger.info(
+            "[reach] NTFY REACHABILITY RESTORED — Railway can reach ntfy.sh "
+            "again; alerts/heartbeats will resume automatically"
+        )
+    elif not reachable and _ntfy_last_reachable is not False:
+        logger.info(
+            "[reach] ntfy.sh unreachable from Railway (egress IP still blocked)"
+        )
+    _ntfy_last_reachable = reachable
 
 
 def _load_user_profile() -> UserProfile | None:
@@ -139,8 +162,18 @@ def _commit_poll_result(
                 tier_tag = f" [{payload.tier}]" if payload.tier != "standard" else ""
                 print(f"ALERT {company.name} ({label}){tier_tag}")
             else:
+                # Delivery failed (e.g. push endpoint unreachable). Advance the
+                # seen-state anyway so this job isn't re-detected and re-sent
+                # every cycle. An unbounded retry backlog hammers the push
+                # endpoint and can get the egress IP rate-limit-banned, which
+                # then keeps *all* delivery failing. Best-effort, at-most-once.
+                if payload.job_id:
+                    CareerPageScraper.merge_seen_job_id(state, payload.job_id)
+                elif payload.pending_hash:
+                    state.last_hash = payload.pending_hash
+                    state.last_text = payload.pending_text
                 logger.warning(
-                    "Delivery failed for %s (%s); will retry next poll",
+                    "Delivery failed for %s (%s); marking seen to avoid retry storm",
                     company.name,
                     payload.job_title or payload.trigger_keyword,
                 )
@@ -289,6 +322,9 @@ def _poll_and_reschedule(
 
 def main() -> None:
     setup_logging()
+    force_ipv4()
+    if os.getenv("NET_PROBE"):  # opt-in one-time startup egress diagnostic
+        run_network_probe()
     settings = get_settings()
     profile = _load_user_profile()
     if profile is not None:
@@ -304,8 +340,13 @@ def main() -> None:
     logger.info("Internship monitor starting")
     try:
         _poll_and_reschedule(scraper, store, alert_manager, settings)
+        _watch_ntfy_reachability()  # log initial reachability state
+        next_reach_check = time.monotonic() + _NTFY_REACH_CHECK_INTERVAL
         while True:
             schedule.run_pending()
+            if time.monotonic() >= next_reach_check:
+                _watch_ntfy_reachability()
+                next_reach_check = time.monotonic() + _NTFY_REACH_CHECK_INTERVAL
             time.sleep(1)
     except KeyboardInterrupt:
         print("Monitor stopped.")

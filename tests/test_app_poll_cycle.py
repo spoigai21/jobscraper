@@ -49,7 +49,7 @@ def _settings(**overrides: object):
 
 
 class TestRunPollCycle:
-    def test_delivery_failure_retries_without_consuming_job_id(self) -> None:
+    def test_delivery_failure_marks_job_seen_to_avoid_retry_storm(self) -> None:
         company = CompanyConfig(
             name="Waymo",
             url="https://boards-api.greenhouse.io/v1/boards/waymo/jobs?content=true",
@@ -85,7 +85,11 @@ class TestRunPollCycle:
         with patch.object(scraper, "fetch", return_value=GREENHOUSE_BOARD_JSON):
             run_poll_cycle(scraper, store, alert_manager, [company])
 
-        assert json.loads(state.seen_job_ids) == []
+        # Even though delivery failed, the job id is marked seen so it is not
+        # re-alerted every cycle (an unbounded retry backlog can get the push
+        # endpoint's egress IP banned). Best-effort, at-most-once delivery.
+        assert json.loads(state.seen_job_ids) == ["501"]
+        # No *successful* alert was recorded.
         assert state.last_alerted is None
         assert state.alert_count == 0
         store.log_alert.assert_not_called()
