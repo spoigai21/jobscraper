@@ -290,7 +290,47 @@ class AlertManager:
             logger.exception("Failed ntfy request for %s", payload.company)
             return False
 
+    def _discord_enabled(self) -> bool:
+        return bool(self._settings.discord_webhook_url)
+
+    def _send_discord(self, content: str) -> bool:
+        """Post a message to a Discord channel via an incoming webhook.
+
+        Used as the primary push transport because Railway's shared egress IP
+        is blocked by ntfy.sh but can reach Discord. Discord returns 204 on
+        success. Content is capped at Discord's 2000-char limit.
+        """
+        url = self._settings.discord_webhook_url
+        if not url:
+            logger.error("Discord skipped: DISCORD_WEBHOOK_URL is not configured")
+            return False
+        try:
+            response = requests.post(
+                url,
+                json={"content": content[:2000]},
+                timeout=self._settings.request_timeout,
+            )
+            if not response.ok:
+                logger.error(
+                    "Discord webhook failed (%s): %s",
+                    response.status_code,
+                    response.text.strip(),
+                )
+                return False
+            return True
+        except Exception:
+            logger.exception("Failed Discord webhook request")
+            return False
+
     def send_push(self, payload: AlertPayload) -> bool:
+        if self._discord_enabled():
+            prefix = "🚨 " if payload.tier == "high" else "🎯 "
+            content = f"{prefix}**{self._push_title(payload)}**\n{self._push_body(payload)}"
+            ok = self._send_discord(content)
+            if ok:
+                logger.info("Push sent via Discord for %s", payload.company)
+            return ok
+
         if not self._settings.ntfy_topic:
             logger.error("Push skipped: NTFY_TOPIC is not configured")
             return False
@@ -311,11 +351,7 @@ class AlertManager:
         companies_checked: int,
         last_poll_at: str | None,
     ) -> bool:
-        """Send a low-priority ntfy push confirming the monitor is alive."""
-        if not self._settings.ntfy_topic:
-            logger.error("Health ping skipped: NTFY_TOPIC is not configured")
-            return False
-
+        """Send a low-priority push confirming the monitor is alive."""
         last_poll_line = last_poll_at or "unknown"
         body = (
             f"Monitor is alive.\n"
@@ -323,6 +359,14 @@ class AlertManager:
             f"Companies checked (last cycle): {companies_checked}\n"
             f"Last successful poll: {last_poll_line}"
         )
+        if self._discord_enabled():
+            ok = self._send_discord(f"✅ Internship monitor heartbeat\n{body}")
+            if ok:
+                logger.info("Health ping sent via Discord")
+            return ok
+        if not self._settings.ntfy_topic:
+            logger.error("Health ping skipped: NTFY_TOPIC is not configured")
+            return False
         headers = {
             "Title": "Internship monitor heartbeat",
             "Priority": "low",

@@ -46,6 +46,7 @@ _TCP_TARGETS: tuple[tuple[str, str, int], ...] = (
     ("Cloudflare 1.1.1.1", "1.1.1.1", 443),
     ("Google DNS 8.8.8.8", "8.8.8.8", 443),
     ("github.com", "github.com", 443),
+    ("discord.com", "discord.com", 443),
     # DigitalOcean control: a different DO host/range. If this reaches DO but
     # ntfy.sh does not, ntfy.sh is blocking our egress IP (not a DO route issue).
     ("caddyserver.com (DigitalOcean)", "caddyserver.com", 443),

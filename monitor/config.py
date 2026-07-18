@@ -37,6 +37,7 @@ class Settings:
     ntfy_topic: str
     alert_email_to: str
     ntfy_token: str = ""
+    discord_webhook_url: str = ""
     poll_interval_business: int = 2700
     poll_interval_overnight: int = 10800
     business_hours_start: int = 9
@@ -75,6 +76,7 @@ def get_settings() -> Settings:
         twilio_to_number=os.getenv("TWILIO_TO_NUMBER", ""),
         ntfy_topic=os.getenv("NTFY_TOPIC", ""),
         ntfy_token=os.getenv("NTFY_TOKEN", ""),
+        discord_webhook_url=os.getenv("DISCORD_WEBHOOK_URL", ""),
         alert_email_to=os.getenv("ALERT_EMAIL_TO", ""),
         poll_interval_business=_env_int("POLL_INTERVAL_BUSINESS", 2700),
         poll_interval_overnight=_env_int("POLL_INTERVAL_OVERNIGHT", 10800),
