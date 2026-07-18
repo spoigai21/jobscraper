@@ -307,7 +307,12 @@ class AlertManager:
         try:
             response = requests.post(
                 url,
-                json={"content": content[:2000]},
+                json={
+                    "content": content[:2000],
+                    # Allow @here/@everyone so alerts actually fire a
+                    # notification even on channels set to "Only @mentions".
+                    "allowed_mentions": {"parse": ["everyone"]},
+                },
                 timeout=self._settings.request_timeout,
             )
             if not response.ok:
@@ -325,7 +330,10 @@ class AlertManager:
     def send_push(self, payload: AlertPayload) -> bool:
         if self._discord_enabled():
             prefix = "🚨 " if payload.tier == "high" else "🎯 "
-            content = f"{prefix}**{self._push_title(payload)}**\n{self._push_body(payload)}"
+            content = (
+                f"@here {prefix}**{self._push_title(payload)}**\n"
+                f"{self._push_body(payload)}"
+            )
             ok = self._send_discord(content)
             if ok:
                 logger.info("Push sent via Discord for %s", payload.company)
@@ -360,7 +368,7 @@ class AlertManager:
             f"Last successful poll: {last_poll_line}"
         )
         if self._discord_enabled():
-            ok = self._send_discord(f"✅ Internship monitor heartbeat\n{body}")
+            ok = self._send_discord(f"@here ✅ Internship monitor heartbeat\n{body}")
             if ok:
                 logger.info("Health ping sent via Discord")
             return ok
