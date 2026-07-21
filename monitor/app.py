@@ -149,6 +149,7 @@ def _commit_poll_result(
             results = alert_manager.fire(payload)
             if alert_manager.any_success(results):
                 store.log_alert(payload, results)
+                store.record_alerted_job(payload)
                 if payload.job_id:
                     CareerPageScraper.merge_seen_job_id(state, payload.job_id)
                 elif payload.pending_hash:
@@ -334,7 +335,7 @@ def main() -> None:
             profile.alerts.high_score_threshold,
         )
     store = StateStore(settings.monitor_db_path)
-    scraper = CareerPageScraper(settings, profile)
+    scraper = CareerPageScraper(settings, profile, store)
     alert_manager = AlertManager(settings, profile)
 
     logger.info("Internship monitor starting")

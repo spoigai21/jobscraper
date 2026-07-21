@@ -9,7 +9,7 @@ import logging
 import re
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlparse
 
 import requests
@@ -56,8 +56,10 @@ from monitor.notification_keywords import (
     select_notification_keywords,
     title_from_diff_snippet,
 )
+from monitor.dedup import job_dedup_key
 from monitor.profile import UserProfile
 from monitor.scoring import classify_tier, score_job, should_exclude
+from monitor.storage import StateStore
 
 logger = logging.getLogger(__name__)
 
@@ -134,10 +136,16 @@ class CareerPageScraper:
         self,
         settings: Settings,
         profile: UserProfile | None = None,
+        store: StateStore | None = None,
     ) -> None:
-        """Initialize the scraper with runtime settings (timeouts, user agent, etc.)."""
+        """Initialize the scraper with runtime settings (timeouts, user agent, etc.).
+
+        ``store`` supplies the history of already-alerted roles; without it,
+        content-level dedup is skipped and only job-ID diffing applies.
+        """
         self._settings = settings
         self._profile = profile
+        self._store = store
         # Per-poll status is held in thread-local storage so concurrent
         # poll_company calls (POLL_WORKERS > 1) don't clobber each other's
         # fetch failure reason / status on the shared scraper instance.
@@ -988,7 +996,76 @@ class CareerPageScraper:
             detected_at=now_iso,
             diff_snippet=diff_snippet[:300],
             notification_keywords=notification_keywords,
+            dedup_key=job_dedup_key(job.company_name or company.name, job.title),
         )
+
+    def _is_stale_on_first_sight(self, job: JobPosting, now: datetime) -> bool:
+        """True when a newly-seen listing was published too long ago to be news.
+
+        Aggregator feeds occasionally re-index and re-add listings that have
+        been open for months; those arrive as new IDs. Age is measured from the
+        source's own publish date, not from our poll history, so an outage
+        never causes a job to be dropped. Listings without a publish date (most
+        boards) are never filtered here.
+        """
+        max_age_days = self._settings.max_new_listing_age_days
+        if max_age_days <= 0 or not job.posted_at:
+            return False
+        try:
+            posted = datetime.fromisoformat(job.posted_at)
+        except ValueError:
+            return False
+        if posted.tzinfo is None:
+            posted = posted.replace(tzinfo=timezone.utc)
+        return posted < now - timedelta(days=max_age_days)
+
+    def _recently_alerted_keys(self, now: datetime) -> set[str]:
+        """Dedup keys still inside the repeat-suppression window."""
+        if self._store is None:
+            return set()
+        since = now - timedelta(days=self._settings.alert_dedup_window_days)
+        return self._store.recent_dedup_keys(since.isoformat())
+
+    def _drop_repeat_alerts(
+        self,
+        payloads: list[AlertPayload],
+        company: CompanyConfig,
+        now: datetime,
+    ) -> tuple[list[AlertPayload], set[str]]:
+        """Filter re-posts of roles already alerted on.
+
+        Employers close and re-list the same internship under a new requisition
+        ID every few weeks, so ID diffing alone reports it as new each time.
+        Returns the payloads to send plus the job IDs suppressed as repeats
+        (which the caller marks seen so they aren't re-evaluated every poll).
+        """
+        if self._settings.alert_dedup_window_days <= 0:
+            return payloads, set()
+
+        alerted_keys = self._recently_alerted_keys(now)
+        if not alerted_keys and len(payloads) < 2:
+            return payloads, set()
+
+        kept: list[AlertPayload] = []
+        suppressed_ids: set[str] = set()
+        seen_this_cycle: set[str] = set()
+        for payload in payloads:
+            key = payload.dedup_key
+            # No usable key (e.g. an empty title) -> never suppress.
+            if key and (key in alerted_keys or key in seen_this_cycle):
+                logger.info(
+                    "Suppressing repeat listing for %s: %r (%s)",
+                    company.name,
+                    payload.job_title,
+                    payload.job_id,
+                )
+                if payload.job_id:
+                    suppressed_ids.add(payload.job_id)
+                continue
+            if key:
+                seen_this_cycle.add(key)
+            kept.append(payload)
+        return kept, suppressed_ids
 
     def _is_cooldown_active(self, state: StateRecord, now: datetime) -> bool:
         if state.last_alerted is None:
@@ -1076,13 +1153,32 @@ class CareerPageScraper:
             return PollResult(closed_jobs=tuple(closed_jobs))
 
         filtered_ids: set[str] = set()
+        stale_ids: set[str] = set()
         alert_payloads: list[AlertPayload] = []
         for job in new_jobs:
+            if self._is_stale_on_first_sight(job, now):
+                stale_ids.add(job.id)
+                continue
             payload = self._build_job_alert(job, company, now_iso)
             if payload is None:
                 filtered_ids.add(job.id)
             else:
                 alert_payloads.append(payload)
+
+        if stale_ids:
+            # One summary line: a feed re-index can add hundreds at once.
+            logger.info(
+                "Skipping %d newly-listed but stale postings for %s (older than %d days)",
+                len(stale_ids),
+                company.name,
+                self._settings.max_new_listing_age_days,
+            )
+            filtered_ids |= stale_ids
+
+        alert_payloads, repeat_ids = self._drop_repeat_alerts(
+            alert_payloads, company, now
+        )
+        filtered_ids |= repeat_ids
 
         if filtered_ids:
             seen_ids |= filtered_ids

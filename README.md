@@ -251,6 +251,14 @@ Career pages change frequently (cookie banners, nav updates, job count widgets).
 
 Profile-based filters in `monitor/profile.yaml` (`roles_exclude`, `location`) also drop irrelevant postings on per-job boards (Greenhouse, Ashby, Lever, Uber).
 
+### Repeated alerts for the same internship
+
+Job IDs are only stable while a posting stays up. Employers routinely close a requisition and re-list the identical role under a new ID (Copart cycles "Software Engineer Intern" through new Workday numbers every couple of weeks), and aggregator feeds like Simplify mint a fresh UUID for each one — so ID diffing alone reports the same job as new over and over.
+
+The monitor therefore also dedups on content: employer + normalized role title, ignoring spelling variants ("Engineering"/"Engineer"), cycle years, and seasons. A role already alerted on is suppressed for `ALERT_DEDUP_WINDOW_DAYS` (default `30`); after that it can alert again. Set it to `0` to disable and go back to pure ID diffing. Suppressions are logged as `Suppressing repeat listing for ...` in `monitor.log`, and the history lives in the `alerted_jobs` table.
+
+A second filter covers stale backfill: when a listing is seen for the *first* time, it is skipped if the source says it was posted more than `MAX_NEW_LISTING_AGE_DAYS` ago (default `14`, `0` disables). This only applies to sources that report a publish date — today that is the Simplify feeds; every other board is unaffected. Age is measured from the listing's own posting date rather than from poll history, so a monitor outage of any length still catches up on everything posted during it.
+
 ### Rate limiting
 
 Aggressive polling can get your IP blocked by career sites.

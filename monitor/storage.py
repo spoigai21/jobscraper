@@ -65,8 +65,21 @@ class StateStore:
                     detected_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS alerted_jobs (
+                    dedup_key        TEXT PRIMARY KEY,
+                    company          TEXT NOT NULL,
+                    job_title        TEXT NOT NULL DEFAULT '',
+                    job_url          TEXT NOT NULL DEFAULT '',
+                    first_alerted_at TEXT NOT NULL,
+                    last_alerted_at  TEXT NOT NULL,
+                    alert_count      INTEGER NOT NULL DEFAULT 1
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_alert_log_detected_at
                     ON alert_log (detected_at DESC);
+
+                CREATE INDEX IF NOT EXISTS idx_alerted_jobs_last_alerted_at
+                    ON alerted_jobs (last_alerted_at DESC);
 
                 CREATE INDEX IF NOT EXISTS idx_closed_jobs_detected_at
                     ON closed_jobs (detected_at DESC);
@@ -180,6 +193,43 @@ class StateStore:
             )
             conn.commit()
         logger.info("Logged alert for %s (%s)", payload.company, payload.trigger_keyword)
+
+    def record_alerted_job(self, payload: AlertPayload) -> None:
+        """Remember that this role was alerted on, keyed by content not job ID."""
+        if not payload.dedup_key:
+            return
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO alerted_jobs (
+                    dedup_key, company, job_title, job_url,
+                    first_alerted_at, last_alerted_at, alert_count
+                ) VALUES (?, ?, ?, ?, ?, ?, 1)
+                ON CONFLICT(dedup_key) DO UPDATE SET
+                    job_title       = excluded.job_title,
+                    job_url         = excluded.job_url,
+                    last_alerted_at = excluded.last_alerted_at,
+                    alert_count     = alerted_jobs.alert_count + 1
+                """,
+                (
+                    payload.dedup_key,
+                    payload.company,
+                    payload.job_title,
+                    payload.job_url,
+                    payload.detected_at,
+                    payload.detected_at,
+                ),
+            )
+            conn.commit()
+
+    def recent_dedup_keys(self, since_iso: str) -> set[str]:
+        """Dedup keys alerted on at or after ``since_iso``."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT dedup_key FROM alerted_jobs WHERE last_alerted_at >= ?",
+                (since_iso,),
+            ).fetchall()
+        return {row["dedup_key"] for row in rows}
 
     def log_closed_job(self, event: ClosedJobEvent) -> None:
         with self._connect() as conn:

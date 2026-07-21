@@ -14,6 +14,7 @@ informative (the alert's company field is the aggregator, "Simplify").
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 from monitor.models import JobPosting
@@ -33,6 +34,24 @@ def simplify_listings_url(year: int) -> str:
 def is_simplify_url(url: str) -> bool:
     lowered = url.lower()
     return _SIMPLIFY_HOST in lowered and "listings.json" in lowered
+
+
+def _posted_at(value: Any) -> str:
+    """Convert the feed's ``date_posted`` epoch seconds to an ISO timestamp.
+
+    Returns an empty string for missing or unparseable values so callers fall
+    back to treating the listing's age as unknown.
+    """
+    try:
+        epoch = float(value)
+    except (TypeError, ValueError):
+        return ""
+    if epoch <= 0:
+        return ""
+    try:
+        return datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat()
+    except (OverflowError, OSError, ValueError):
+        return ""
 
 
 def _join(value: Any) -> str:
@@ -84,6 +103,7 @@ def parse_simplify(
                 url=url,
                 description=description,
                 company_name=company,
+                posted_at=_posted_at(entry.get("date_posted")),
             )
         )
     return jobs

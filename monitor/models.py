@@ -15,6 +15,9 @@ class JobPosting:
     url: str
     description: str
     company_name: str
+    # ISO 8601 publish time, when the source reports one. Empty means unknown,
+    # which callers must treat as "do not filter on age".
+    posted_at: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +46,7 @@ class AlertPayload:
     relevance_score: int = 0
     tier: AlertTier = "standard"
     notification_keywords: tuple[str, ...] = ()
+    dedup_key: str = ""
     pending_hash: str = ""
     pending_text: str = ""
 

@@ -45,6 +45,13 @@ class Settings:
     request_timeout: int = 15
     min_alert_interval: int = 3600
     max_alerts_per_company_per_cycle: int = 0  # 0 = unlimited (no per-cycle cap)
+    # Suppress a repeat alert for the same employer+role within this many days
+    # (re-posts get fresh job IDs). 0 = disabled.
+    alert_dedup_window_days: int = 30
+    # Skip a listing seen for the first time if the source says it was posted
+    # more than this many days ago (stale backfill). Only applies to sources
+    # that report a publish date. 0 = disabled.
+    max_new_listing_age_days: int = 14
     user_agent: str = DEFAULT_USER_AGENT
     monitor_db_path: str = str(DEFAULT_DB_PATH)
     health_ping_enabled: bool = True
@@ -87,6 +94,8 @@ def get_settings() -> Settings:
         max_alerts_per_company_per_cycle=_env_int(
             "MAX_ALERTS_PER_COMPANY_PER_CYCLE", 0
         ),
+        alert_dedup_window_days=_env_int("ALERT_DEDUP_WINDOW_DAYS", 30),
+        max_new_listing_age_days=_env_int("MAX_NEW_LISTING_AGE_DAYS", 14),
         user_agent=os.getenv("USER_AGENT") or DEFAULT_USER_AGENT,
         monitor_db_path=os.getenv("MONITOR_DB_PATH") or str(DEFAULT_DB_PATH),
         health_ping_enabled=_env_bool("HEALTH_PING_ENABLED", True),
