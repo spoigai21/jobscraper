@@ -10,7 +10,7 @@ import pytest
 from monitor.alerts import AlertManager
 from monitor.config import Settings
 from monitor.models import AlertPayload
-from monitor.profile import load_profile
+from monitor.profile import AlertConfig, AlertTierConfig, load_profile
 
 
 def _test_settings(**overrides: object) -> Settings:
@@ -29,9 +29,21 @@ def _test_settings(**overrides: object) -> Settings:
     return Settings(**defaults)
 
 
+# Routing is asserted against channels pinned here rather than whatever
+# profile.yaml currently sets, so tuning your own alert channels can't break
+# these tests. What they verify is that `fire` dispatches exactly the channels
+# the profile lists for the payload's tier.
+_ROUTING_ALERTS = AlertConfig(
+    standard=AlertTierConfig(channels=("push", "email")),
+    high=AlertTierConfig(channels=("push", "call", "sms", "email")),
+    high_score_threshold=7,
+)
+
+
 @pytest.fixture
 def manager() -> AlertManager:
-    return AlertManager(_test_settings(), load_profile())
+    profile = replace(load_profile(), alerts=_ROUTING_ALERTS)
+    return AlertManager(_test_settings(), profile)
 
 
 @pytest.fixture

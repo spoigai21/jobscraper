@@ -69,14 +69,27 @@ class TestLoadProfile:
         assert profile.scoring.space_perception_bonus == 2
 
     def test_alert_tier_channels(self, profile) -> None:
-        assert profile.alerts.standard.channels == ("push", "email")
-        assert set(profile.alerts.high.channels) == {"push", "call", "sms", "email"}
+        # Channels are a personal preference and change freely in profile.yaml;
+        # assert the invariants instead of the current selection.
+        valid = {"push", "call", "sms", "email"}
+        assert set(profile.alerts.standard.channels) <= valid
+        assert set(profile.alerts.high.channels) <= valid
+        assert profile.alerts.standard.channels, "standard tier needs a channel"
+        # Escalating to high tier must never notify on fewer channels.
+        assert set(profile.alerts.high.channels) >= set(
+            profile.alerts.standard.channels
+        )
         assert profile.alerts.high_score_threshold == 7
 
     def test_alert_channels_for_score(self, profile) -> None:
-        assert profile.alert_channels_for_score(3) == ("push", "email")
-        assert profile.alert_channels_for_score(7) == profile.alerts.high.channels
-        assert profile.alert_channels_for_score(12) == profile.alerts.high.channels
+        threshold = profile.alerts.high_score_threshold
+        assert profile.alert_channels_for_score(threshold - 1) == (
+            profile.alerts.standard.channels
+        )
+        assert profile.alert_channels_for_score(threshold) == profile.alerts.high.channels
+        assert profile.alert_channels_for_score(threshold + 5) == (
+            profile.alerts.high.channels
+        )
 
     def test_load_profile_from_explicit_path(self) -> None:
         loaded = load_profile(DEFAULT_PROFILE_PATH)
