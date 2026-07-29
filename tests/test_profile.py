@@ -14,11 +14,15 @@ class TestLoadProfile:
         assert DEFAULT_PROFILE_PATH.is_file()
 
     def test_loads_user_info(self, profile) -> None:
-        assert profile.user.name == "Savir Khanna"
-        assert profile.user.school == "Northeastern University"
-        assert profile.user.degree == "BS Data Science & Physics"
-        assert profile.user.grad_year == 2028
-        assert profile.user.graduation == "June 2028"
+        # Assert shape, not a specific person: profile.yaml is user-owned config
+        # and every fork edits it. Pinning the values here breaks the suite for
+        # anyone who fills in their own details.
+        assert profile.user.name
+        assert profile.user.school
+        assert profile.user.degree
+        assert isinstance(profile.user.grad_year, int)
+        assert 2020 < profile.user.grad_year < 2100
+        assert profile.user.graduation
 
     def test_target_cycle_year_is_2027(self, profile) -> None:
         assert profile.target_cycle_year == 2027
