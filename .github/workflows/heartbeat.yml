@@ -36,6 +36,16 @@ jobs:
           key: monitor-db-
           restore-keys: monitor-db-
 
+      - name: Verify alert channel is configured
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "::error::DISCORD_WEBHOOK_URL is not set. Alerts would go nowhere."
+            exit 1
+          fi
+          echo "Discord webhook present (${#DISCORD_WEBHOOK_URL} chars)."
+
       - name: Send heartbeat
         env:
           MONITOR_DB_PATH: monitor.db

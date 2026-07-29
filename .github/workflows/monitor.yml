@@ -42,6 +42,18 @@ jobs:
           key: monitor-db-${{ github.run_id }}
           restore-keys: monitor-db-
 
+      # Without this the job goes green while every alert silently fails to
+      # deliver — the one failure mode a scheduled monitor cannot afford.
+      - name: Verify alert channel is configured
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "::error::DISCORD_WEBHOOK_URL is not set. Alerts would go nowhere."
+            exit 1
+          fi
+          echo "Discord webhook present (${#DISCORD_WEBHOOK_URL} chars)."
+
       - name: Poll
         env:
           MONITOR_DB_PATH: monitor.db
@@ -49,4 +61,9 @@ jobs:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           POLL_WORKERS: '4'
           POLL_DOMAIN_MAX_CONCURRENT: '2'
+          # Only alert on Simplify listings the source says were posted within
+          # 3 days. Direct company boards report no publish date and are
+          # unaffected — for those, "newly appeared since last poll" already
+          # means posted within the hour.
+          MAX_NEW_LISTING_AGE_DAYS: '3'
         run: python cli.py run-once
