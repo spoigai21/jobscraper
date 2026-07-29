@@ -9,7 +9,7 @@ name: Heartbeat
 # scraping nothing.
 on:
   schedule:
-    - cron: '0 14 * * *'  # daily, ~10am ET
+    - cron: '43 14 * * *'  # daily, ~10am ET (off :00 — see monitor.yml)
   workflow_dispatch:
 
 jobs:

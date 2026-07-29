@@ -6,10 +6,13 @@ name: Poll internships
 # needed and drift by an hour when US daylight saving flips.
 on:
   schedule:
-    - cron: '0 13-23 * * 1-5'           # weekdays hourly, ~9am-7pm ET
-    - cron: '0 0-3 * * 2-6'             # weekday evenings hourly, ~8-11pm ET
-    - cron: '0 4,8 * * *'               # overnight, every 4h
-    - cron: '0 0,4,8,12,16,20 * * 0,6'  # weekends, every 4h
+    # Minute 17, never :00. Every cron on GitHub fires at :00, and scheduled
+    # runs on free/public repos are dropped rather than queued under load —
+    # at :00 we observed 3 of 4 runs silently never happen.
+    - cron: '17 13-23 * * 1-5'           # weekdays hourly, ~9am-7pm ET
+    - cron: '17 0-3 * * 2-6'             # weekday evenings hourly, ~8-11pm ET
+    - cron: '17 4,8 * * *'               # overnight, every 4h
+    - cron: '17 0,4,8,12,16,20 * * 0,6'  # weekends, every 4h
   workflow_dispatch:                     # manual "Run workflow" button
 
 # Never let two polls run at once — they would race on the state DB and on the
