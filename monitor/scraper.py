@@ -1110,7 +1110,10 @@ class CareerPageScraper:
         is_first_seed = not seen_ids and not (state.last_hash or "").strip()
 
         state.last_hash = self.hash_content(text)
-        state.last_text = text
+        # This path diffs by job ID and never reads last_text back. Storing the
+        # full page text here cost ~133 MB across 95 companies, which is both
+        # dead weight on disk and resident memory every cycle.
+        state.last_text = ""
         state.last_checked = now_iso
 
         if is_first_seed:
