@@ -1,0 +1,52 @@
+name: Poll internships
+
+# Cadence lives here, not in the app. `run-once` polls whenever it is invoked;
+# these schedules decide when. Times are UTC — GitHub cron has no timezone and
+# no DST awareness, so the windows below are deliberately a little wider than
+# needed and drift by an hour when US daylight saving flips.
+on:
+  schedule:
+    - cron: '0 13-23 * * 1-5'           # weekdays hourly, ~9am-7pm ET
+    - cron: '0 0-3 * * 2-6'             # weekday evenings hourly, ~8-11pm ET
+    - cron: '0 4,8 * * *'               # overnight, every 4h
+    - cron: '0 0,4,8,12,16,20 * * 0,6'  # weekends, every 4h
+  workflow_dispatch:                     # manual "Run workflow" button
+
+# Never let two polls run at once — they would race on the state DB and on the
+# cache entry that carries it between runs.
+concurrency:
+  group: poll-internships
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # Each run saves a new cache entry and restores the newest previous one.
+      # Cache keys are immutable, hence run_id in the key: a fixed key would
+      # pin the DB to its first-ever version and silently stop persisting state.
+      - name: Restore state DB
+        uses: actions/cache@v4
+        with:
+          path: monitor.db
+          key: monitor-db-${{ github.run_id }}
+          restore-keys: monitor-db-
+
+      - name: Poll
+        env:
+          MONITOR_DB_PATH: monitor.db
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          POLL_WORKERS: '4'
+          POLL_DOMAIN_MAX_CONCURRENT: '2'
+        run: python cli.py run-once

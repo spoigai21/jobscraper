@@ -1,0 +1,44 @@
+name: Heartbeat
+
+# Separate from the poll workflow on purpose: the in-cycle health ping gates on
+# a process-global timestamp, which resets on every run under a short-lived
+# runner. `run-once` disables it and this daily job owns liveness instead.
+#
+# Note that GitHub already emails you when a scheduled workflow fails, so this
+# is a backstop for the quieter failure: runs that succeed while silently
+# scraping nothing.
+on:
+  schedule:
+    - cron: '0 14 * * *'  # daily, ~10am ET
+  workflow_dispatch:
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # restore-only: this job never writes the DB, so it must not save a cache
+      # entry — that would make an unmodified copy the newest one the poll
+      # workflow restores from.
+      - name: Restore state DB
+        uses: actions/cache/restore@v4
+        with:
+          path: monitor.db
+          key: monitor-db-
+          restore-keys: monitor-db-
+
+      - name: Send heartbeat
+        env:
+          MONITOR_DB_PATH: monitor.db
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: python cli.py heartbeat

@@ -355,15 +355,22 @@ class AlertManager:
     def send_health_ping(
         self,
         *,
-        uptime_hours: float,
+        uptime_hours: float | None,
         companies_checked: int,
         last_poll_at: str | None,
     ) -> bool:
-        """Send a low-priority push confirming the monitor is alive."""
+        """Send a low-priority push confirming the monitor is alive.
+
+        `uptime_hours` is None for short-lived runners (GitHub Actions), where
+        the process exits after each cycle and uptime is meaningless.
+        """
         last_poll_line = last_poll_at or "unknown"
+        uptime_line = (
+            f"Uptime: {uptime_hours:.1f} hours\n" if uptime_hours is not None else ""
+        )
         body = (
             f"Monitor is alive.\n"
-            f"Uptime: {uptime_hours:.1f} hours\n"
+            f"{uptime_line}"
             f"Companies checked (last cycle): {companies_checked}\n"
             f"Last successful poll: {last_poll_line}"
         )

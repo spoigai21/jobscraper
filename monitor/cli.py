@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -11,9 +12,16 @@ import click
 from monitor.alerts import AlertManager
 from monitor.companies import COMPANIES
 from monitor.config import PACKAGE_DIR, Settings, get_settings, setup_logging
-from monitor.app import get_poll_interval, main as run_monitor
+from monitor.app import (
+    _load_user_profile,
+    get_poll_interval,
+    main as run_monitor,
+    run_poll_cycle,
+)
 from monitor.models import AlertPayload, CompanyConfig, StateRecord
+from monitor.net import force_ipv4
 from monitor.profile import load_profile
+from monitor.scraper import CareerPageScraper
 from monitor.storage import StateStore
 
 COMPANIES_PATH = PACKAGE_DIR / "companies.py"
@@ -259,6 +267,50 @@ def toggle(company_name: str) -> None:
 def run() -> None:
     """Start the internship monitor daemon."""
     run_monitor()
+
+
+@cli.command("run-once")
+def run_once() -> None:
+    """Run a single poll cycle and exit.
+
+    Entry point for scheduled runners (GitHub Actions, cron) where the
+    process is short-lived and the schedule lives outside the app.
+    """
+    setup_logging()
+    force_ipv4()
+    # The in-cycle health ping gates on a module-level timestamp that resets
+    # every process, so a one-shot run would fire it on every invocation.
+    # The daily `heartbeat` command owns that job instead.
+    settings = replace(get_settings(), health_ping_enabled=False)
+    profile = _load_user_profile()
+    store = StateStore(settings.monitor_db_path)
+    scraper = CareerPageScraper(settings, profile, store)
+    alert_manager = AlertManager(settings, profile)
+    run_poll_cycle(scraper, store, alert_manager, COMPANIES, settings)
+
+
+@cli.command()
+def heartbeat() -> None:
+    """Send a liveness ping summarizing the most recent poll."""
+    setup_logging()
+    force_ipv4()
+    settings = get_settings()
+    if not settings.health_ping_enabled:
+        click.echo("Health ping disabled (HEALTH_PING_ENABLED=false).")
+        return
+
+    store = StateStore(settings.monitor_db_path)
+    alert_manager = AlertManager(settings, load_profile())
+    states = store.get_all_states()
+    last_polls = [p for p in (_parse_iso(s.last_checked) for s in states) if p]
+    last_poll = max(last_polls) if last_polls else None
+
+    ok = alert_manager.send_health_ping(
+        uptime_hours=None,
+        companies_checked=len(states),
+        last_poll_at=last_poll.isoformat() if last_poll else None,
+    )
+    click.echo("Heartbeat sent." if ok else "Heartbeat FAILED.")
 
 
 if __name__ == "__main__":
