@@ -10,6 +10,10 @@ builder = "nixpacks"
 # requires: if a previous execution is still running when the next is due,
 # Railway skips it, and main.py's `while True` loop never exits.
 startCommand = "python cli.py run-once"
+# NOTE: this key is NOT applied from railway.toml — verified 2026-07-31, the
+# service still read cronSchedule=null after a deploy. It must be set on the
+# service itself (dashboard Settings -> Deploy -> Cron Schedule, or the
+# serviceInstanceUpdate API). Kept here as the source of truth for the value.
 cronSchedule = "17 * * * *"
 # NEVER, not ON_FAILURE: a failed run should wait for the next scheduled
 # firing rather than restart-looping outside the schedule.
