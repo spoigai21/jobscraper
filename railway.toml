@@ -2,6 +2,15 @@
 builder = "nixpacks"
 
 [deploy]
-startCommand = "python main.py"
-restartPolicyType = "ON_FAILURE"
-restartPolicyMaxRetries = 3
+# Cron service, not a daemon. Railway's free plan forces `sleepApplication`
+# on unless a service has a cron schedule, so `python main.py` would poll once
+# and then sleep forever — which is exactly what happened on 2026-07-29.
+#
+# `run-once` polls a single cycle and exits, which is what Railway's cron
+# requires: if a previous execution is still running when the next is due,
+# Railway skips it, and main.py's `while True` loop never exits.
+startCommand = "python cli.py run-once"
+cronSchedule = "17 * * * *"
+# NEVER, not ON_FAILURE: a failed run should wait for the next scheduled
+# firing rather than restart-looping outside the schedule.
+restartPolicyType = "NEVER"
